@@ -8,6 +8,7 @@
         triggerIngest,
         refreshMart,
         analyzeBatch,
+        streamBatchAnalysis,
         getConfig,
     } from "./api.js";
     import AnalysisCard from "./AnalysisCard.svelte";
@@ -71,7 +72,7 @@
             "Reactive Trigger: Starting Sequential Analysis... Len:",
             filteredRankings.length,
         );
-        runSequentialAnalysis(filteredRankings.slice(0, 20));
+        runStreamingAnalysis(filteredRankings.slice(0, 20));
     }
 
     function getFilteredRankings(data, pFilter, eFilter) {
@@ -167,7 +168,7 @@
     let processedCount = 0;
     let totalTargets = 0;
 
-    async function runSequentialAnalysis(targets) {
+    async function runStreamingAnalysis(targets) {
         if (targets.length === 0) return;
 
         batchLoading = true;
@@ -181,54 +182,39 @@
         }
 
         console.log(
-            `Starting SEQUENTIAL analysis for ${targets.length} targets`,
+            `Starting STREAMING analysis for ${targets.length} targets (SIMD/Concurrent)`,
         );
 
+        const req = {
+            defect_name: defectName,
+            start_date: startDate,
+            end_date: endDate,
+            targets: targets.map((t) => ({
+                equipment_id: t.equipment_id,
+                process_code: t.process_code,
+            })),
+        };
+
         try {
-            for (const target of targets) {
-                // If we already have a result, skip (or overwrite if force reload?)
-                // For now, simple skip to avoid re-fetching on reactivity triggers
-                if (batchResults[target.equipment_id]) {
-                    processedCount++;
-                    continue;
-                }
-
-                const req = {
-                    defect_name: defectName,
-                    start_date: startDate,
-                    end_date: endDate,
-                    targets: [
-                        {
-                            equipment_id: target.equipment_id,
-                            process_code: target.process_code,
-                        },
-                    ],
-                };
-
-                try {
-                    const resp = await analyzeBatch(req);
-                    if (resp.results && resp.results[target.equipment_id]) {
-                        // Update Reactively
-                        batchResults = {
-                            ...batchResults,
-                            [target.equipment_id]:
-                                resp.results[target.equipment_id],
-                        };
-                    }
-                } catch (err) {
+            await streamBatchAnalysis(req, (data) => {
+                // data is { equipment_id, result, error }
+                if (data.error) {
                     console.error(
-                        `Failed to analyze ${target.equipment_id}:`,
-                        err,
+                        `Stream error for ${data.equipment_id}:`,
+                        data.error,
                     );
-                    // Mark as failed in UI? Or just leave empty
-                }
+                    // Can mark error in UI if needed
+                } else if (data.result) {
+                    // Update Reactively
+                    batchResults[data.equipment_id] = data.result;
+                    // Trigger Svelte update
+                    batchResults = batchResults;
 
-                processedCount++;
-                // Small delay to allow UI to breathe
-                await new Promise((r) => setTimeout(r, 100));
-            }
+                    processedCount++;
+                }
+            });
         } catch (e) {
-            console.error("Sequential Analysis Fatal Error:", e);
+            console.error("Streaming Analysis Fatal Error:", e);
             batchError = e.message || "Unknown error";
         } finally {
             batchLoading = false;
@@ -628,7 +614,7 @@
         <div class="flex gap-2 mt-2">
             <button
                 class="btn btn-xs btn-primary"
-                on:click={() => runSequentialAnalysis(rankings.slice(0, 20))}
+                on:click={() => runStreamingAnalysis(rankings.slice(0, 20))}
                 >Retry Analysis</button
             >
             <button class="btn btn-xs btn-secondary" on:click={loadRankings}

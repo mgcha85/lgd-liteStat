@@ -34,6 +34,7 @@ func SetupRouter(h *Handler) *mux.Router {
 	analyzeRouter := r.PathPrefix("/api/analyze").Subrouter()
 	analyzeRouter.HandleFunc("", h.RequestAnalysis).Methods("POST") // Matches /api/analyze
 	analyzeRouter.HandleFunc("/batch", h.AnalyzeBatch).Methods("POST")
+	analyzeRouter.HandleFunc("/stream", h.AnalyzeStream).Methods("POST")
 	analyzeRouter.HandleFunc("/{jobId}/status", h.GetAnalysisStatus).Methods("GET")
 	analyzeRouter.HandleFunc("/{jobId}/results", h.GetAnalysisResults).Methods("GET")
 
@@ -88,4 +89,11 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Flush implements http.Flusher
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }

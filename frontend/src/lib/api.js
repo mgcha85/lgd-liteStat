@@ -103,3 +103,58 @@ export async function updateConfig(config) {
     if (!response.ok) throw new Error("Failed to update config");
     return response.json();
 }
+
+export async function streamBatchAnalysis(req, onResult) {
+    const response = await fetch(`${API_BASE}/analyze/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Stream Error: ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+
+            // Handle all complete lines (leave the last one in buffer if incomplete)
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (line.trim()) {
+                    try {
+                        const json = JSON.parse(line);
+                        onResult(json);
+                    } catch (e) {
+                        console.error("Stream Parse Error:", e, line);
+                    }
+                }
+            }
+        }
+
+        if (buffer && buffer.trim()) {
+            try {
+                const json = JSON.parse(buffer);
+                onResult(json);
+            } catch (e) {
+                console.error("Stream Final Parse Error:", e, buffer);
+            }
+        }
+
+    } catch (e) {
+        console.error("Stream Reader Error:", e);
+        throw e;
+    } finally {
+        reader.releaseLock();
+    }
+}
