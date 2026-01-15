@@ -1,0 +1,51 @@
+services:
+  backend:
+    image: golang:1.24-bookworm
+    container_name: lgd-litestat-backend
+    hostname: litestat-backend
+    working_dir: /app
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+      - ./config.yaml:/app/config.yaml
+    environment:
+      - DB_PATH=/app/data/analytics.duckdb
+      - CGO_ENABLED=1
+    command: sh -c "apt-get update && apt-get install -y gcc g++ make && go mod download && go run main.go"
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      litestat-network:
+        aliases:
+          - litestat-backend
+
+  frontend:
+    image: node:20-slim
+    container_name: lgd-litestat-frontend
+    hostname: litestat-frontend
+    working_dir: /app
+    ports:
+      - "8081:5173"
+    volumes:
+      - ./frontend:/app
+    command: sh -c "npm install && npm run dev -- --host"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      litestat-network:
+        aliases:
+          - litestat-frontend
+    restart: unless-stopped
+
+networks:
+  litestat-network:
+    driver: bridge

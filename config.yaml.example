@@ -1,0 +1,93 @@
+# Display Manufacturing Data Analysis System Configuration
+
+# Source Data Query Templates
+queries:
+  inspection: |
+    SELECT 
+      glass_id,
+      panel_id,
+      product_id,
+      term_name,
+      inspection_end_ymdhms,
+      process_code,
+      COALESCE(defect_count, 1) as defect_count
+    FROM ${SOURCE_INSPECTION_TABLE}
+    WHERE inspection_end_ymdhms >= '{{.StartDate}}'
+      AND inspection_end_ymdhms < '{{.EndDate}}'
+  
+  history: |
+    SELECT 
+      glass_id,
+      product_id,
+      lot_id,
+      equipment_line_id,
+      process_code,
+      timekey_ymdhms,
+      ROW_NUMBER() OVER (
+        PARTITION BY glass_id, process_code, equipment_line_id 
+        ORDER BY timekey_ymdhms DESC
+      ) as seq_num
+    FROM ${SOURCE_HISTORY_TABLE}
+    WHERE timekey_ymdhms >= '{{.StartDate}}'
+      AND timekey_ymdhms < '{{.EndDate}}'
+
+# Analysis Parameters
+analysis:
+  # Top N equipments to return in rankings
+  top_n_limit: 100
+  
+  # Default pagination limit
+  default_page_size: 100
+  
+  # Maximum records per page
+  max_page_size: 1000
+
+# Process Code Mappings (optional - for display purposes)
+process_mappings:
+  P100: "Photo Lithography"
+  P200: "Etching"
+  P300: "Deposition"
+  P400: "Inspection"
+  P500: "Packaging"
+
+# Equipment Groups (optional - for filtering)
+equipment_groups:
+  critical:
+    - EQ001
+    - EQ002
+    - EQ010
+  non_critical:
+    - EQ020
+    - EQ030
+
+# Mock Data Generation Settings (for testing)
+mock_data:
+  enabled: true
+  inspection_records: 1000000
+  history_records: 500000
+  time_range_days: 400
+  products:
+    - ABCDEF
+    - GHIJKL
+    - MNOPQR
+  processes:
+    - P100
+    - P200
+    - P300
+    - P400
+    - P500
+  equipments:
+    - EQ001
+    - EQ002
+    - EQ003
+    - EQ004
+    - EQ005
+    - EQ010
+    - EQ020
+    - EQ030
+  defect_terms:
+    - "TYPE1-SPOT-SIZE-DARK"
+    - "TYPE1-LINE-SIZE-BRIGHT"
+    - "TYPE2-SCRATCH-SIZE-DARK"
+    - "TYPE2-PARTICLE-SIZE-BRIGHT"
+    - "TYPE3-STAIN-SIZE-DARK"

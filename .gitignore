@@ -1,0 +1,56 @@
+# Environment files
+.env
+*.env
+!.env.example
+
+# Configuration files
+config.yaml
+!config.yaml.example
+
+# Database files
+*.duckdb
+*.duckdb.wal
+data/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+go.work
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node
+node_modules/
+dist/
+build/
+.svelte-kit/
+.vercel/
+.output/
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Test artifacts
+coverage/
+*.cover
