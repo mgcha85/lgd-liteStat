@@ -20,7 +20,7 @@
       // Ensure settings struct exists if backend returned partial
       if (!config.Settings) config.Settings = { DefectTerms: [] };
     } catch (e) {
-      error = "Failed to load configuration. Backend might be down.";
+      error = "설정을 불러오는데 실패했습니다. 백엔드 상태를 확인해주세요.";
       console.error(e);
     } finally {
       loading = false;
@@ -45,7 +45,7 @@
             class:btn-active={activeTab === "dashboard"}
             on:click={() => (activeTab = "dashboard")}
           >
-            📊 Dashboard
+            📊 대시보드
           </button>
         </li>
         <li>
@@ -54,7 +54,7 @@
             class:btn-active={activeTab === "settings"}
             on:click={() => (activeTab = "settings")}
           >
-            ⚙️ Settings
+            ⚙️ 설정
           </button>
         </li>
       </ul>
@@ -79,13 +79,13 @@
         >
         <span>{error}</span>
         <button class="btn btn-sm btn-outline" on:click={refreshConfig}
-          >Retry</button
+          >재시도</button
         >
       </div>
     {:else if loading && !config}
       <div class="flex flex-col items-center justify-center h-[50vh]">
         <span class="loading loading-bars loading-lg text-primary"></span>
-        <p class="mt-4 text-gray-500">Loading Configuration...</p>
+        <p class="mt-4 text-gray-500">설정 로드 중...</p>
       </div>
     {:else if config}
       {#if activeTab === "dashboard"}

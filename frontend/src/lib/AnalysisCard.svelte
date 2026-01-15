@@ -44,20 +44,31 @@
 
             chart.setOption({
                 title: {
-                    text: "Glass Defects",
+                    text: "글라스 불량",
                     left: "center",
                     textStyle: { fontSize: 10 },
                 },
                 grid: { top: "15%", bottom: "10%", left: 40, right: 10 },
-                xAxis: { type: "time", splitLine: { show: false } },
+                xAxis: {
+                    type: "time",
+                    splitLine: { show: false },
+                    axisLabel: {
+                        rotate: 45,
+                        formatter: {
+                            year: "{yyyy}",
+                            month: "{yyyy}-{MM}-{dd}",
+                            day: "{yyyy}-{MM}-{dd}",
+                        },
+                    },
+                },
                 yAxis: {
                     type: "value",
                     splitLine: { show: true },
-                    name: "Defects",
+                    name: "불량 수",
                 },
                 series: [
                     {
-                        name: "Target",
+                        name: "대상",
                         type: "scatter",
                         data: targetData,
                         symbolSize: 4,
@@ -70,7 +81,7 @@
                         },
                     },
                     {
-                        name: "Others",
+                        name: "그 외",
                         type: "scatter",
                         data: othersData,
                         symbolSize: 3,
@@ -93,7 +104,7 @@
 
             chart.setOption({
                 title: {
-                    text: "Lot Avg Defects",
+                    text: "Lot 평균 불량",
                     left: "center",
                     textStyle: { fontSize: 12 },
                 },
@@ -102,7 +113,7 @@
                 yAxis: { type: "value" },
                 series: [
                     {
-                        name: "Others",
+                        name: "그 외",
                         type: "scatter",
                         data: othersData,
                         symbolSize: 4,
@@ -110,7 +121,7 @@
                         itemStyle: { color: "#95a5a6" },
                     },
                     {
-                        name: "Target",
+                        name: "대상",
                         type: "scatter",
                         data: targetData,
                         symbolSize: 6,
@@ -134,23 +145,34 @@
 
             chart.setOption({
                 title: {
-                    text: "Daily Trend",
+                    text: "일별 추이",
                     left: "center",
                     textStyle: { fontSize: 12 },
                 },
                 grid: { top: 30, bottom: 20, left: 40, right: 10 },
-                xAxis: { type: "time" },
+                xAxis: {
+                    type: "time",
+                    splitLine: { show: false },
+                    axisLabel: {
+                        rotate: 45,
+                        formatter: {
+                            year: "{yyyy}",
+                            month: "{yyyy}-{MM}-{dd}",
+                            day: "{yyyy}-{MM}-{dd}",
+                        },
+                    },
+                },
                 yAxis: { type: "value" },
                 series: [
                     {
-                        name: "Others",
+                        name: "그 외",
                         type: "line",
                         data: othersData,
                         showSymbol: false, // Scatter removed
                         lineStyle: { color: "#95a5a6", width: 1 },
                     },
                     {
-                        name: "Target",
+                        name: "대상",
                         type: "line",
                         data: targetData,
                         showSymbol: false, // Scatter removed
@@ -179,15 +201,15 @@
         renderHeatmap(
             heatTargetDiv,
             heatTargetData,
-            "Target Map",
+            "대상 맵",
             ["#fff", "#e74c3c"],
             globalMax,
         );
         renderHeatmap(
             heatOthersDiv,
             heatOthersData,
-            "Others Map",
-            ["#fff", "#7f8c8d"],
+            "그 외 맵",
+            ["#fff", "#e74c3c"],
             globalMax,
         );
     }
@@ -267,28 +289,28 @@
             {#if results.metrics}
                 <div class="flex gap-4 mb-2 text-sm bg-base-50 p-2 rounded">
                     <div>
-                        Overall: <span class="font-bold"
+                        전체: <span class="font-bold"
                             >{results.metrics.overall_defect_rate?.toFixed(
                                 3,
                             )}</span
                         >
                     </div>
                     <div>
-                        Target: <span class="font-bold text-error"
+                        대상: <span class="font-bold text-error"
                             >{results.metrics.target_defect_rate?.toFixed(
                                 3,
                             )}</span
                         >
                     </div>
                     <div>
-                        Others: <span class="font-bold"
+                        그 외: <span class="font-bold"
                             >{results.metrics.others_defect_rate?.toFixed(
                                 3,
                             )}</span
                         >
                     </div>
                     <div>
-                        Delta: <span
+                        차이: <span
                             class={results.metrics.delta > 0
                                 ? "text-success font-bold"
                                 : "text-error font-bold"}
@@ -333,7 +355,7 @@
             </div>
         {:else}
             <div class="flex items-center justify-center h-64 text-gray-400">
-                Waiting for analysis...
+                분석 중...
             </div>
         {/if}
     </div>

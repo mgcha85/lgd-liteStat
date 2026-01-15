@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,11 +15,15 @@ import (
 	"lgd-litestat/api"
 	"lgd-litestat/config"
 	"lgd-litestat/database"
+	"lgd-litestat/etl"
 	"lgd-litestat/jobs"
 	"lgd-litestat/mart"
 )
 
 func main() {
+	mockFlag := flag.Bool("mock", false, "Generate mock data and exit")
+	flag.Parse()
+
 	fmt.Println("=== LGD liteStat - Display Manufacturing Data Analysis System ===")
 
 	// Load configuration
@@ -41,6 +46,14 @@ func main() {
 		log.Fatalf("Failed to create schema: %v", err)
 	}
 	log.Println("✓ Database schema created")
+
+	// Check mock flag
+	if *mockFlag {
+		if err := etl.RunMockGeneration(repo, cfg); err != nil {
+			log.Fatalf("Mock generation failed: %v", err)
+		}
+		return
+	}
 
 	// Initialize worker pool
 	workerPool := jobs.NewWorkerPool(cfg.WorkerPoolSize)

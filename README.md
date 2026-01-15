@@ -38,9 +38,9 @@ graph TB
     end
     
     subgraph "Storage - DuckDB"
-        RAW[("Raw Tables<br/>inspection<br/>history")]
+        RAW[("Raw Tables<br/>lake_mgr.eas_pnl_ins_def_a<br/>lake_mgr.mas_pnl_prod_eqp_h")]
         CACHE[("Cache<br/>analysis_cache<br/>analysis_jobs")]
-        AGGREGATED[("Mart<br/>glass_stats")]
+        AGGREGATED[("Mart<br/>lake_mgr.glass_stats")]
     end
     
     subgraph "Frontend - Svelte" 
@@ -63,8 +63,8 @@ graph TB
 
 ### 3-Layer Design
 
-1. **Raw Layer** - 원본 데이터 (inspection, history)
-2. **Mart Layer** - 집계 데이터 (glass_stats) - 성능 최적화의 핵심
+1. **Raw Layer** - 원본 데이터 (`lake_mgr` 스키마 내 테이블)
+2. **Mart Layer** - 집계 데이터 (`glass_stats`) - 성능 최적화의 핵심
 3. **Serving Layer** - 동적 쿼리 (Target vs Others 분류)
 
 ---
@@ -82,7 +82,7 @@ lgd-liteStat/
 │   ├── database/                 # DuckDB 통합
 │   │   ├── db.go                # 연결 및 초기화
 │   │   ├── repository.go        # 데이터 접근 계층
-│   │   └── schema.sql           # 테이블 스키마 (5개 테이블)
+│   │   └── schema_duckdb.sql    # lake_mgr 스키마 및 테이블 정의
 │   ├── etl/                      # ETL 파이프라인
 │   │   ├── ingest.go            # 데이터 수집 및 변환
 │   │   └── mock.go              # 목 데이터 생성기 (1M+ records)
@@ -127,372 +127,173 @@ lgd-liteStat/
 
 ### Backend
 
-| Category | Technology | Version | Purpose |
-|----------|-----------|---------|---------|
-| **Language** | Go | 1.24+ | 고성능 서버, CGO 지원 |
-| **Database** | DuckDB | Latest | 임베디드 OLAP 엔진 (CGO) |
-| **HTTP Router** | Gorilla Mux | 1.8+ | REST API 라우팅 |
-| **Configuration** | Viper | 1.21+ | YAML 설정 관리 |
-| **Environment** | godotenv | 1.5+ | .env 파일 로딩 |
-| **UUID** | google/uuid | 1.6+ | Job ID 생성 |
-| **CORS** | gorilla/handlers | 1.5+ | CORS 미들웨어 |
+- **Language**: Go 1.24+
+- **Database**: DuckDB (Embedded OLAP, CGO required)
+- **Frameworks**: Gorilla Mux, Viper, godotenv
 
 ### Frontend
 
-| Category | Technology | Version | Purpose |
-|----------|-----------|---------|---------|
-| **Framework** | Svelte | 4+ | 반응형 UI 프레임워크 |
-| **Build Tool** | Vite | 7+ | 빌드 및 개발 서버 |
-| **Charts** | Plotly.js | Latest | Scatter/Line/Heatmap 차트 |
-| **Export** | jsPDF + html2canvas | Latest | PDF/HTML 내보내기 |
-
-### Infrastructure
-
-| Category | Technology | Purpose |
-|----------|-----------|---------|
-| **Container** | Docker | 애플리케이션 컨테이너화 |
-| **Orchestration** | Docker Compose | 멀티 컨테이너 관리 |
-| **Web Server** | Nginx (Alpine) | 정적 파일 서빙 + 리버스 프록시 |
-| **Scheduler** | Cron | 데이터 수집 자동화 |
-
-### Key Dependencies
-
-**Go Modules:**
-```go
-require (
-    github.com/marcboeker/go-duckdb v1.8.5  // DuckDB driver (CGO)
-    github.com/gorilla/mux v1.8.1           // HTTP router
-    github.com/spf13/viper v1.21.0          // Configuration
-    github.com/joho/godotenv v1.5.1         // Environment variables
-    github.com/google/uuid v1.6.0           // UUID generation
-    github.com/gorilla/handlers v1.5.2      // CORS middleware
-)
-```
+- **Framework**: Svelte 4+ (Vite)
+- **Charts**: Plotly.js (Scatter/Line/Heatmap)
+- **Styling**: TailwindCSS + DaisyUI
 
 ---
 
 ## 📊 데이터 모델 (Data Model)
 
+모든 데이터는 `lake_mgr` 스키마 내에 저장됩니다.
+
 ### 테이블 구조 (Tables)
 
-#### 1. inspection - 검사 정보
+#### 1. lake_mgr.eas_pnl_ins_def_a - 검사 정보 (Inspection)
 ```sql
-CREATE TABLE inspection (
-    glass_id TEXT,                      -- Glass 식별자 (조인 키)
-    panel_id TEXT,                      -- Panel 식별자
-    product_id TEXT,                    -- 제품 ID
-    panel_addr TEXT,                    -- panel_id - product_id
-    term_name TEXT,                     -- 원본 불량명 (예: "TYPE1-SPOT-SIZE-DARK")
-    defect_name TEXT,                   -- 추출된 불량명 (예: "SPOT-DARK")
-    inspection_end_ymdhms TIMESTAMP,
-    process_code TEXT,
-    defect_count INTEGER
+CREATE TABLE lake_mgr.eas_pnl_ins_def_a (
+    glass_id TEXT,                    -- Glass 식별자
+    panel_id TEXT,                    -- Panel 식별자
+    product_id TEXT,                  -- 제품 ID
+    panel_addr TEXT,                  -- Panel 주소 (예: A1, B2)
+    def_pnt_x FLOAT,                  -- 불량 위치 X
+    def_pnt_y FLOAT,                  -- 불량 위치 Y
+    term_name TEXT,                   -- 불량명
+    inspection_end_ymdhms TIMESTAMP,  -- 검사 종료 시간
+    process_code TEXT,                -- 공정 코드
+    defect_count INTEGER              -- 불량 수
 );
 ```
 
-#### 2. history - 진행 이력
+#### 2. lake_mgr.mas_pnl_prod_eqp_h - 진행 이력 (History)
 ```sql
-CREATE TABLE history (
-    glass_id TEXT,                      -- Glass 식별자 (조인 키)
+CREATE TABLE lake_mgr.mas_pnl_prod_eqp_h (
+    glass_id TEXT,                    -- Glass 식별자
     product_id TEXT,
-    lot_id TEXT,                        -- 로트 ID (30 glasses/lot)
-    equipment_line_id TEXT,             -- 장비 ID
-    process_code TEXT,
-    timekey_ymdhms TIMESTAMP,
-    seq_num INTEGER                     -- 중복 처리용 (높을수록 최신)
+    lot_id TEXT,                      -- Lot ID
+    equipment_line_id TEXT,           -- 장비 ID
+    process_code TEXT,                -- 공정 코드
+    track_out_ymdhms TIMESTAMP,       -- 공정 완료 시간
+    seq_num INTEGER                   -- 순번
 );
 ```
 
-#### 3. glass_stats - 데이터 마트 (핵심)
+#### 3. lake_mgr.glass_stats - 데이터 마트 (Mart)
 ```sql
-CREATE TABLE glass_stats (
+CREATE TABLE lake_mgr.glass_stats (
     glass_id TEXT PRIMARY KEY,
     lot_id TEXT,
     product_id TEXT,
     work_date DATE,
-    total_defects INTEGER,              -- 사전 집계된 불량 수
+    total_defects INTEGER,            -- 요약된 전체 불량 수
     created_at TIMESTAMP
 );
 ```
 
-#### 4. analysis_cache - 분석 결과 캐시
-```sql
-CREATE TABLE analysis_cache (
-    cache_key TEXT PRIMARY KEY,         -- 요청 파라미터의 MD5 해시
-    request_params JSON,
-    glass_results JSON,                 -- Glass별 결과
-    lot_results JSON,                   -- Lot별 집계
-    daily_results JSON,                 -- 일별 시계열
-    heatmap_results JSON,               -- Panel 위치 히트맵
-    metrics JSON,                       -- 요약 지표
-    created_at TIMESTAMP,
-    expires_at TIMESTAMP
-);
-```
-
-#### 5. analysis_jobs - 비동기 작업 추적
-```sql
-CREATE TABLE analysis_jobs (
-    job_id TEXT PRIMARY KEY,
-    status TEXT,                        -- pending|running|completed|failed
-    cache_key TEXT,
-    error_message TEXT,
-    progress INTEGER,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP
-);
-```
-
-### 데이터 변환 로직 (Transformation Logic)
-
-#### defect_name 추출
-```
-term_name: "TYPE1-SPOT-SIZE-DARK"
-         ↓ (요소 2, 4 추출)
-defect_name: "SPOT-DARK"
-```
-
-#### panel_addr 계산
-```
-panel_id: "ABCDEFAB1"
-product_id: "ABCDEF"
-         ↓ (빼기)
-panel_addr: "AB1"
-```
-
-#### History 중복 제거
-```sql
--- 같은 glass+process+equipment 조합에서 마지막 기록만 유지
-SELECT DISTINCT ON (glass_id, process_code, equipment_line_id) *
-FROM history
-ORDER BY glass_id, process_code, equipment_line_id, seq_num DESC
-```
+#### 4. analysis_cache & jobs
+- `analysis_cache`: 분석 결과 JSON 캐싱 (Key: Request MD5)
+- `analysis_jobs`: 비동기 분석 작업 상태 추적
 
 ---
 
 ## 📡 API 목록 (API Endpoints)
 
-총 **10개의 REST API** 제공:
+### 1. Analysis APIs
+- `GET /api/equipment/rankings` - 장비별 불량률 순위 (기간, 불량명 필터)
+- `POST /api/analyze` - 상세 분석 요청 (비동기)
+- `GET /api/analyze/:id/results` - 분석 결과 조회 (Glass/Lot/Daily/Heatmap)
 
-### 1. Health Check
-- `GET /health` - 시스템 상태 확인
-
-### 2. Data Query APIs (신규 추가)
-- `GET /api/inspection` - **검사 정보 조회** (시간 단위 필수, process_code, defect_name 옵션)
-- `GET /api/history` - **진행이력 조회** (glass_id 필수, process_code, equipment_id 옵션)
-
-### 3. Data Management APIs
-- `POST /api/ingest` - 데이터 수집 (시간 범위)
-- `POST /api/mart/refresh` - 데이터 마트 갱신
-- `POST /api/cleanup` - 오래된 데이터 삭제 (1년+)
-
-### 4. Analysis APIs
-- `POST /api/analyze` - 분석 요청 (비동기)
-- `GET /api/analyze/:id/status` - 분석 상태 확인
-- `GET /api/analyze/:id/results` - 분석 결과 조회 (4개 테이블 + 지표)
-- `GET /api/equipment/rankings` - 장비별 불량률 순위
-
-**📘 상세 사용법**: [`API.md`](./API.md) 참조
+### 2. Data Management
+- `POST /api/mart/refresh` - 데이터 마트 수동 갱신
 
 ---
 
 ## 🚀 Quick Start
 
-### 전제조건 (Prerequisites)
-
-- **Go 1.24+** - CGO 지원을 위한 최신 버전
-- **GCC/G++** - DuckDB 컴파일에 필요
-- **Docker & Docker Compose** - 컨테이너 배포용
-- **Node.js 20+** - 프론트엔드 개발 (현재 미완성)
-
 ### 로컬 개발 (Local Development)
 
-#### 백엔드 실행
-
+#### 1. 백엔드 실행
 ```bash
 cd backend
-
-# 의존성 설치
 go mod download
-
-# 빌드
-CGO_ENABLED=1 go build -o bin/lgd-litestat main.go
-
-# 실행
-./bin/lgd-litestat
+# -mock 플래그로 목 데이터 생성
+go run main.go -mock 
+go run main.go
 ```
+서버: `http://localhost:8080`
 
-서버 시작: `http://localhost:8080`
-
-#### API 테스트
-
+#### 2. 프론트엔드 실행
 ```bash
-# 전체 API 자동 테스트
-chmod +x test_backend.sh
-./test_backend.sh
-
-# 또는 개별 테스트
-curl http://localhost:8080/health
+cd frontend
+nvm use 20
+npm install
+npm run dev
 ```
+UI: `http://localhost:5173`
 
 ### 프로덕션 배포 (Production Deployment)
 
 ```bash
-# 모든 서비스 시작
-docker-compose up -d
-
-# 로그 확인
-docker-compose logs -f backend
-
-# 서비스 중지
-docker-compose down
+# Docker Compose로 전체 스택 실행
+podman-compose up -d --build
 ```
 
 ---
 
-## ⏰ Crontab 스케줄링 예시
+### Data Preprocessing & Ingestion Logic
 
-```bash
-# crontab 편집
-crontab -e
+The system performs specific transformations during data ingestion (Upsert) to prepare for analysis:
 
-# 아래 추가:
+1.  **Panel Address Derivation**:
+    *   `panel_addr` is derived by removing the `product_id` prefix from the `panel_id`.
+    *   Example: `panel_id='G123A1'`, `product_id='G123'` -> `panel_addr='A1'`.
+    *   **Coordinates**: `panel_x` is the prefix (e.g., 'A'), and `panel_y` is the suffix (e.g., '1').
+    *   Heatmaps are aggregated based on these `panel_x` and `panel_y` text labels.
 
-# 매시간 데이터 수집 (정시)
-0 * * * * curl -X POST http://localhost:8080/api/ingest -H "Content-Type: application/json" -d '{"start_time":"'$(date -u -d '1 hour ago' +\%Y-\%m-\%dT\%H:00:00Z)'","end_time":"'$(date -u +\%Y-\%m-\%dT\%H:00:00Z)'"}'
+2.  **Defect Name Extraction**:
+    *   derived from `def_latest_summary_defect_term_name_s`.
+    *   Format: `TYPE-DEFECT-SIZE-REASON`. Extracted as `DEFECT-REASON` (Parts 2 & 4).
 
-# 매시간 마트 갱신 (수집 5분 후)
-5 * * * * curl -X POST http://localhost:8080/api/mart/refresh
+3.  **Ranking Logic (Delta)**:
+    *   **Delta** = `Avg(Others) - Overall Avg`.
+    *   **Others Avg**: Average defect rate of all other equipment in the same process group.
+    *   **Sort**: Ascending by Delta. (Negative Delta indicates the equipment is performing better than the group average, assuming lower defect rate is better).
+    *   **Note**: Original requirement was Others - Overall.
 
-# 매일 새벽 2시 정리 작업
-0 2 * * * curl -X POST http://localhost:8080/api/cleanup
-```
+4.  **Grouping**:
+    *   Analysis is grouped by `equipment_line_id` AND `process_code`.
+    *   Duplicate glasses (due to child equipment) are handled via `COUNT(DISTINCT product_id)`.
 
----
-
-## 📈 성능 벤치마크 (Performance)
-
-Mock 데이터 기준 (1M inspection + 500K history):
-
-| 작업 | 소요 시간 | 비고 |
-|-----|---------|------|
-| 데이터 수집 | ~3-5초 | Bulk insert with transactions |
-| 마트 갱신 | ~2-3초 | DISTINCT ON + aggregation |
-| Glass 쿼리 | ~100-500ms | Indexed joins |
-| 전체 분석 (연간) | ~5-10초 | 4개 쿼리 + 히트맵 |
-| 장비 순위 | ~1-2초 | Group by + join |
-
-**바이너리 크기**: 53MB (DuckDB 엔진 포함)
+## API Documentation
 
 ---
 
-## 🔧 Configuration
+##  Configuration
 
 ### 환경 변수 (.env)
-
 ```env
-# 데이터베이스
 DB_PATH=./data/analytics.duckdb
-
-# 소스 시스템 (실제 데이터 수집용)
-SOURCE_DB_HOST=source-db-host.example.com
-SOURCE_DB_USER=etl_user
-SOURCE_DB_PASSWORD=changeme
-
-# API 서버
 API_PORT=8080
-
-# 데이터 보존 기간 (일)
-DATA_RETENTION_DAYS=365
-
-# 워커 풀 크기
-WORKER_POOL_SIZE=4
 ```
 
-### 애플리케이션 설정 (config.yaml)
-
-```yaml
-# SQL 쿼리 템플릿
-queries:
-  inspection: |
-    SELECT * FROM inspection_table
-    WHERE time >= '{{.StartDate}}'
-
-# 분석 파라미터
-analysis:
-  top_n_limit: 100
-  default_page_size: 100
-
-# 목 데이터 설정
-mock_data:
-  enabled: true
-  inspection_records: 1000000
-  history_records: 500000
-```
+### 목 데이터 (Mock Data)
+`main.go -mock` 실행 시 `etl/mock.go`가 `lake_mgr` 테이블에 랜덤 데이터를 생성합니다. 
+생성된 데이터는 `duckdb` 파일에 저장되므로, 컨테이너 재시작 시에도 유지됩니다.
 
 ---
 
 ## 🐛 문제 해결 (Troubleshooting)
 
-### CGO 오류
-```
-error: CGO_ENABLED=1 required
-```
-
-**해결**:
-```bash
-# Ubuntu/Debian
-sudo apt-get install build-essential
-
-# Alpine (Docker)
-apk add gcc g++ musl-dev
-```
-
-### 데이터베이스 잠금
-```
-error: database is locked
-```
-
-**해결**: DuckDB는 단일 writer 모델. 백엔드 인스턴스 하나만 실행되는지 확인
-
-### Node.js 버전 오류
-```
-Vite requires Node.js version 20.19+
-```
-
-**해결**:
-```bash
-nvm install 20
-nvm use 20
-```
-
----
-
-## 📝 추가 문서
-
-- **[API.md](./API.md)** - 전체 API 상세 문서 (curl 예시 포함)
-- **[walkthrough.md](./.gemini/antigravity/brain/.../walkthrough.md)** - 구현 상세 내역
-- **[implementation_plan.md](./.gemini/antigravity/brain/.../implementation_plan.md)** - 설계 문서
+### "No Data" in Dashboard
+1. `go run main.go -mock`을 실행하여 데이터를 생성했는지 확인하세요.
+2. 대시보드의 날짜 범위가 생성된 데이터 범위(기본 2주 전 ~ 오늘)와 일치하는지 확인하세요.
+3. 브라우저 콘솔(F12)에서 `/api/equipment/rankings` 호출이 성공하는지 확인하세요.
 
 ---
 
 ## 🎯 현재 상태 (Current Status)
 
 ### ✅ 완료
-- Backend 100% (10 APIs, DuckDB, async jobs, caching)
-- Mock data generator (1M+ records)
-- Docker deployment configuration
-- Comprehensive documentation
+- Backend: `lake_mgr` 스키마 마이그레이션 완료
+- API: 장비 랭킹 및 분석 API 연동 완료
+- Frontend: 대시보드 UI 개선, 디버그 모드 제거, 날짜 기본값 변경(2주)
+- Database: DuckDB 기반 고성능 쿼리 엔진 적용
 
 ### ⚠️ 진행 중
-- Frontend (Node.js 20+ 필요 - 시스템 제약)
-
----
-
-## 📄 License
-
-MIT
-
-## 👥 Contributors
-
-- Initial implementation: 2026-01-15
+- Heatmap 데이터 정합성 검증 (Mock 데이터 좌표 분포)

@@ -26,6 +26,11 @@
     let analysisResults = null;
     let jobStatus = null;
 
+    let batchResults = {}; // Map<EquipmentID, Results>
+    let batchLoading = false;
+    let batchError = null;
+    let batchAttempted = false;
+
     // Pagination
     let currentPage = 1;
     let pageSize = 20;
@@ -49,18 +54,19 @@
         }
     }
 
+    // ... (downloadExcel function remains same) ...
     function downloadExcel() {
         if (!filteredRankings || filteredRankings.length === 0) return;
 
         // Create CSV Header
         const headers = [
-            "Rank",
-            "Equipment ID",
-            "Process",
-            "Defect Rate",
-            "Delta",
-            "Total Defects",
-            "Glass Count",
+            "순위",
+            "설비 ID",
+            "공정",
+            "불량률",
+            "차이",
+            "총 불량 수",
+            "글라스 수",
         ];
 
         // Map Data
@@ -68,7 +74,7 @@
             index + 1,
             r.equipment_id,
             r.process_code,
-            (r.defect_rate * 100).toFixed(4) + "%", // as percentage? or raw? usually raw is better for excel but user sees formatted. I'll provide formatted.
+            (r.defect_rate * 100).toFixed(4) + "%",
             (r.delta * 100).toFixed(4) + "%",
             r.total_defects,
             r.glass_count,
@@ -96,18 +102,18 @@
     }
 
     let activeTab = "dashboard";
-    let performanceLogs = [];
+    // performanceLogs removed
 
     // Filters
-    // Default to 2025-06-01 to match current mock data range (June 2025 - Jan 2026)
-    let startDate = "2025-06-01";
-    let endDate = new Date().toISOString().split("T")[0];
+    // Default to 2 weeks ago
+    let today = new Date();
+    let twoWeeksAgo = new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000);
+    let startDate = twoWeeksAgo.toISOString().split("T")[0];
+    let endDate = today.toISOString().split("T")[0];
 
-    // Defect Name (Dropdown)
+    // ... variables ...
     let defectTerms = config?.Settings?.DefectTerms || [];
     let defectName = defectTerms[0] || "";
-
-    // Advanced Filters
     let processCodeFilter = "";
     let equipmentFilter = "";
 
@@ -130,7 +136,7 @@
     );
 
     onMount(async () => {
-        await loadRankings();
+        // await loadRankings(); // Auto-load disabled
     });
 
     // Reactive Trigger for Batch Analysis
@@ -141,115 +147,17 @@
         !batchLoading &&
         !loading
     ) {
-        console.log(
-            "Reactive Trigger: Starting Sequential Analysis... Len:",
-            filteredRankings.length,
-        );
         runStreamingAnalysis(filteredRankings.slice(0, 20));
     }
 
     function getFilteredRankings(data, pFilter, eFilter) {
         if (!data) return [];
-        console.log("getFilteredRankings DEBUG. In:", data.length);
-        console.log(
-            "Filters Raw:",
-            JSON.stringify(pFilter),
-            JSON.stringify(eFilter),
-        );
-
-        // TEMPORARY: Bypass filters to force rendering
         return data;
-
-        /*
-        let res = data;
-
-        // Equipment Filter (Simple substring)
-        if (eFilter && eFilter.trim()) {
-            const lower = eFilter.trim().toLowerCase();
-            res = res.filter((r) =>
-                r.equipment_id.toLowerCase().includes(lower),
-            );
-        }
-
-        // Process Code Range Filter
-        if (pFilter && pFilter.trim()) {
-            const filter = pFilter.trim();
-            res = res.filter((r) => checkProcessFilter(r.process_code, filter));
-        }
-
-        console.log("Filtered Result:", res.length);
-        return res;
-        */
+        // TEMPORARY: Bypass filters to force rendering
+        // logic commented out for now
     }
 
-    function checkProcessFilter(code, filter) {
-        // Try to parse code as number
-        const val = parseInt(code.replace(/[^0-9]/g, "")); // Strip P if P100 -> 100
-        if (isNaN(val)) return code.includes(filter); // Text fallback
-
-        if (filter.startsWith(">")) {
-            const limit = parseInt(filter.substring(1));
-            return !isNaN(limit) ? val > limit : true;
-        } else if (filter.startsWith("<")) {
-            const limit = parseInt(filter.substring(1));
-            return !isNaN(limit) ? val < limit : true;
-        } else if (filter.includes("-")) {
-            const parts = filter.split("-");
-            const min = parseInt(parts[0]);
-            const max = parseInt(parts[1]);
-            return !isNaN(min) && !isNaN(max) ? val >= min && val <= max : true;
-        }
-        return code.includes(filter);
-    }
-
-    let batchResults = {}; // Map<EquipmentID, Results>
-    let batchLoading = false;
-    let batchError = null;
-    let batchAttempted = false;
-
-    async function loadRankings() {
-        loading = true;
-        error = null;
-        batchResults = {}; // Clear previous results
-        try {
-            const config = await getConfig();
-            const topN = config.analysis?.top_n_limit || 20;
-
-            // Fetch more than limit to allow client filtering
-            // Fetch ALL data (limit=0) for client-side pagination
-            const data = await getEquipmentRankings({
-                start_date: startDate,
-                end_date: endDate,
-                defect_name: defectName,
-                limit: 0,
-            });
-            rankings = data.rankings || [];
-            // filterRankings call removed (Handled by reactive statement)
-
-            console.log("Rankings Loaded:", rankings.length);
-            console.log("Filtered Rankings:", filteredRankings.length);
-
-            batchAttempted = false; // Reset attempt flag to allow reactive trigger
-        } catch (e) {
-            console.error("Load Rankings Error:", e);
-            error = e.message;
-        } finally {
-            loading = false;
-        }
-    }
-
-    async function loadPerformanceLogs() {
-        loading = true;
-        try {
-            performanceLogs = await getAnalysisLogs(20);
-        } catch (e) {
-            console.error("Failed to load logs:", e);
-        } finally {
-            loading = false;
-        }
-    }
-
-    const BATCH_CHUNK_SIZE = 5; // Process 5 equipments at a time
+    const BATCH_CHUNK_SIZE = 5;
     let processedCount = 0;
     let totalTargets = 0;
 
@@ -261,14 +169,9 @@
         processedCount = 0;
         totalTargets = targets.length;
 
-        // Clear previous results ONLY if fresh start
         if (!batchAttempted) {
             batchResults = {};
         }
-
-        console.log(
-            `Starting STREAMING analysis for ${targets.length} targets (SIMD/Concurrent)`,
-        );
 
         const req = {
             defect_name: defectName,
@@ -282,19 +185,14 @@
 
         try {
             await streamBatchAnalysis(req, (data) => {
-                // data is { equipment_id, result, error }
                 if (data.error) {
                     console.error(
                         `Stream error for ${data.equipment_id}:`,
                         data.error,
                     );
-                    // Can mark error in UI if needed
                 } else if (data.result) {
-                    // Update Reactively
                     batchResults[data.equipment_id] = data.result;
-                    // Trigger Svelte update
-                    batchResults = batchResults;
-
+                    batchResults = batchResults; // Trigger Reflow
                     processedCount++;
                 }
             });
@@ -305,21 +203,6 @@
             batchLoading = false;
             batchAttempted = true;
         }
-    }
-
-    // Auto-trigger when paginated rankings are ready
-    $: if (
-        paginatedRankings &&
-        paginatedRankings.length > 0 &&
-        !batchAttempted &&
-        !batchLoading &&
-        !loading
-    ) {
-        console.log(
-            "Reactive Trigger: Starting Streaming Analysis... Page Len:",
-            paginatedRankings.length,
-        );
-        runStreamingAnalysis(paginatedRankings);
     }
 
     async function analyzeEquipment(equipment) {
@@ -474,6 +357,51 @@
         }
     }
 
+    // Toast State
+    let toast = null; // { message: "", type: "info|success|error" }
+
+    function showToast(message, type = "info") {
+        toast = { message, type };
+        setTimeout(() => {
+            toast = null;
+        }, 3000);
+    }
+
+    // Load Rankings
+    async function loadRankings() {
+        loading = true;
+        error = null;
+        batchResults = {};
+        try {
+            const config = await getConfig();
+            const topN = config.analysis?.top_n_limit || 20;
+
+            console.log("Querying with defect:", defectName);
+
+            const data = await getEquipmentRankings({
+                start_date: startDate,
+                end_date: endDate,
+                defect_name: defectName,
+                limit: 0,
+            });
+            rankings = data.rankings || [];
+
+            if (rankings.length === 0) {
+                showToast("검색 결과가 없습니다.", "info");
+            } else {
+                showToast(`조회 완료: ${rankings.length}건`, "success");
+            }
+
+            batchAttempted = false;
+        } catch (e) {
+            console.error("Load Rankings Error:", e);
+            error = e.message;
+            showToast("조회 실패: " + e.message, "error");
+        } finally {
+            loading = false;
+        }
+    }
+
     async function handleIngest() {
         loading = true;
         try {
@@ -481,10 +409,10 @@
             const end = new Date(endDate + "T23:59:59Z").toISOString();
             await triggerIngest(start, end);
             await refreshMart();
-            alert("Ingestion complete!");
+            showToast("데이터 수집 및 갱신 완료!", "success");
             await loadRankings();
         } catch (e) {
-            alert(e.message);
+            showToast("수집 실패: " + e.message, "error");
         } finally {
             loading = false;
         }
@@ -492,91 +420,13 @@
 </script>
 
 <div class="p-6">
-    <!-- Tabs -->
-    <div role="tablist" class="tabs tabs-boxed mb-4">
-        <a
-            role="tab"
-            href="#"
-            tabindex="0"
-            class="tab {activeTab === 'dashboard' ? 'tab-active' : ''}"
-            on:click|preventDefault={() => (activeTab = "dashboard")}
-        >
-            Dashboard
-        </a>
-        <a
-            role="tab"
-            href="#"
-            tabindex="0"
-            class="tab {activeTab === 'performance' ? 'tab-active' : ''}"
-            on:click|preventDefault={() => {
-                activeTab = "performance";
-                loadPerformanceLogs();
-            }}
-        >
-            System Performance
-        </a>
+    <!-- Header/Tabs Removed - Single Dashboard View -->
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold">Display Manufacturing Analysis</h1>
     </div>
 
-    <!-- PERFORMANCE TAB -->
-    {#if activeTab === "performance"}
-        <div class="card bg-base-100 shadow-xl">
-            <div class="card-body">
-                <h2 class="card-title">Recent Analysis Requests (Last 20)</h2>
-                <div class="overflow-x-auto">
-                    <table class="table table-zebra">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Time</th>
-                                <th>Defect</th>
-                                <th>Date Range</th>
-                                <th>Targets</th>
-                                <th>Glass Count</th>
-                                <th>Duration (ms)</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {#each performanceLogs as log}
-                                <tr>
-                                    <td>{log.id}</td>
-                                    <td
-                                        >{new Date(
-                                            log.request_time,
-                                        ).toLocaleString()}</td
-                                    >
-                                    <td>{log.defect_name}</td>
-                                    <td>{log.start_date} ~ {log.end_date}</td>
-                                    <td>{log.target_count}</td>
-                                    <td>{log.glass_count.toLocaleString()}</td>
-                                    <td class="font-mono">{log.duration_ms}</td>
-                                    <td>
-                                        <span
-                                            class="badge {log.status ===
-                                            'success'
-                                                ? 'badge-success'
-                                                : 'badge-error'}"
-                                        >
-                                            {log.status}
-                                        </span>
-                                    </td>
-                                </tr>
-                            {:else}
-                                <tr
-                                    ><td colspan="8" class="text-center"
-                                        >No logs found</td
-                                    ></tr
-                                >
-                            {/each}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    {/if}
-
-    <!-- DASHBOARD TAB -->
-    <div class={activeTab === "dashboard" ? "" : "hidden"}>
+    <!-- DASHBOARD CONTENT -->
+    <div class="">
         <!-- Controls -->
         <div class="card bg-base-100 shadow-xl mb-6">
             <div class="card-body">
@@ -585,7 +435,7 @@
                 >
                     <label class="form-control w-full">
                         <div class="label">
-                            <span class="label-text font-bold">Start Date</span>
+                            <span class="label-text font-bold">시작일</span>
                         </div>
                         <input
                             type="date"
@@ -595,7 +445,7 @@
                     </label>
                     <label class="form-control w-full">
                         <div class="label">
-                            <span class="label-text font-bold">End Date</span>
+                            <span class="label-text font-bold">종료일</span>
                         </div>
                         <input
                             type="date"
@@ -605,8 +455,7 @@
                     </label>
                     <label class="form-control w-full">
                         <div class="label">
-                            <span class="label-text font-bold">Defect Name</span
-                            >
+                            <span class="label-text font-bold">불량명</span>
                         </div>
                         <select
                             bind:value={defectName}
@@ -626,7 +475,7 @@
                             {#if loading && !selectedEquipment}<span
                                     class="loading loading-spinner"
                                 ></span>{/if}
-                            Load
+                            조회
                         </button>
                         <button
                             class="btn btn-secondary flex-1"
@@ -636,7 +485,7 @@
                             {#if loading && !selectedEquipment}<span
                                     class="loading loading-spinner"
                                 ></span>{/if}
-                            Ingest
+                            수집
                         </button>
                     </div>
                 </div>
@@ -647,7 +496,7 @@
                 >
                     <input type="checkbox" />
                     <div class="collapse-title text-md font-medium">
-                        Advanced Filters
+                        상세 필터
                     </div>
                     <div
                         class="collapse-content grid grid-cols-1 md:grid-cols-2 gap-4"
@@ -655,7 +504,7 @@
                         <label class="form-control">
                             <div class="label">
                                 <span class="label-text"
-                                    >Process Code (e.g. >1000, 100-200)</span
+                                    >공정 코드 (예: >1000, 100-200)</span
                                 >
                             </div>
                             <input
@@ -667,7 +516,7 @@
                         </label>
                         <label class="form-control">
                             <div class="label">
-                                <span class="label-text">Equipment ID</span>
+                                <span class="label-text">설비 ID</span>
                             </div>
                             <input
                                 type="text"
@@ -706,13 +555,13 @@
                     <table class="table table-zebra table-pin-rows">
                         <thead>
                             <tr>
-                                <th>Rank</th>
-                                <th>Equipment</th>
-                                <th>Process</th>
-                                <th>Glass Count</th>
-                                <th>Defect Rate</th>
-                                <th>Overall</th>
-                                <th>Delta</th>
+                                <th>순위</th>
+                                <th>설비</th>
+                                <th>공정</th>
+                                <th>제품 수</th>
+                                <th>불량률</th>
+                                <th>전체 평균</th>
+                                <th>차이</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -730,9 +579,15 @@
                                         >{rank.equipment_id}</td
                                     >
                                     <td>{rank.process_code}</td>
-                                    <td>{rank.glass_count.toLocaleString()}</td>
+                                    <td
+                                        >{rank.product_count.toLocaleString()}</td
+                                    >
                                     <td>{rank.defect_rate.toFixed(3)}</td>
-                                    <td>{rank.overall_rate.toFixed(3)}</td>
+                                    <td
+                                        >{rank.overall_defect_rate.toFixed(
+                                            3,
+                                        )}</td
+                                    >
                                     <td
                                         class={rank.delta > 0
                                             ? "text-success font-bold"
@@ -748,7 +603,7 @@
                                     ><td
                                         colspan="7"
                                         class="text-center py-4 text-gray-500"
-                                        >No data available</td
+                                        >데이터가 없습니다</td
                                     ></tr
                                 >
                             {/each}
@@ -779,7 +634,7 @@
                                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                             />
                         </svg>
-                        Download Excel
+                        엑셀 다운로드
                     </button>
 
                     <!-- Pagination (Right/Center) -->
@@ -791,7 +646,7 @@
                             >«</button
                         >
                         <button class="join-item btn btn-sm"
-                            >Page {currentPage} of {totalPages}</button
+                            >{currentPage} / {totalPages}</button
                         >
                         <button
                             class="join-item btn btn-sm"
@@ -806,51 +661,6 @@
 
         <!-- Batch Analysis Cards -->
         <div class="divider">Detailed Analysis (Top 20)</div>
-
-        <!-- DEBUG UI -->
-        <div class="alert alert-info text-xs mb-4 flex flex-col gap-2">
-            <h3 class="font-bold underline">DEBUG CONSOLE</h3>
-            <div class="grid grid-cols-2 gap-2">
-                <div>Rankings (Orig): {rankings.length}</div>
-                <div>
-                    Filtered (Active): {filteredRankings
-                        ? filteredRankings.length
-                        : 0}
-                </div>
-                <div>Batch Attempted: {batchAttempted}</div>
-                <div>Batch Loading: {batchLoading}</div>
-                <div class="text-error font-bold">
-                    Batch Error: {batchError || "None"}
-                </div>
-                <div>Current Defect: {defectName}</div>
-            </div>
-
-            <div class="bg-base-100 p-2 rounded border border-blue-300">
-                <strong
-                    >Result Keys ({Object.keys(batchResults).length}):</strong
-                >
-                <br />
-                <span class="break-all font-mono text-[10px]"
-                    >{Object.keys(batchResults).join(", ")}</span
-                >
-            </div>
-
-            <div class="bg-base-100 p-2 rounded border border-blue-300">
-                <strong>First Target ID:</strong>
-                {rankings[0]?.equipment_id}
-            </div>
-
-            <div class="flex gap-2 mt-2">
-                <button
-                    class="btn btn-xs btn-primary"
-                    on:click={() => runStreamingAnalysis(rankings.slice(0, 20))}
-                    >Retry Analysis</button
-                >
-                <button class="btn btn-xs btn-secondary" on:click={loadRankings}
-                    >Reload Rankings</button
-                >
-            </div>
-        </div>
 
         {#if batchLoading}
             <center
@@ -891,4 +701,13 @@
             </div>
         {/each}
     </div>
+
+    <!-- Toast Notification -->
+    {#if toast}
+        <div class="toast toast-bottom toast-end z-50">
+            <div class="alert alert-{toast.type}">
+                <span>{toast.message}</span>
+            </div>
+        </div>
+    {/if}
 </div>

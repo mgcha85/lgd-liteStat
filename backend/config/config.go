@@ -55,7 +55,7 @@ type Config struct {
 	EquipmentGroups map[string][]string `mapstructure:"equipment_groups"`
 
 	// Mock data settings
-	MockData MockDataConfig
+	MockData MockDataConfig `mapstructure:"mock_data"`
 }
 
 // SettingsConfig holds UI-controllable settings

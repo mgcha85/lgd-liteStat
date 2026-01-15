@@ -4,7 +4,6 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -222,15 +221,26 @@ func (a *Analyzer) executeAnalysis(jobID, cacheKey string, req AnalysisRequest) 
 
 // queryGlassLevel executes glass-level query
 func (a *Analyzer) queryGlassLevel(req AnalysisRequest) ([]GlassResult, error) {
-	// Build query with target classification
+	// Build query with dynamic aggregation
 	query := `
-		WITH target_glasses AS (
-			SELECT DISTINCT glass_id 
-			FROM history 
+		WITH glass_stats AS (
+			SELECT 
+				h.product_id,
+				h.lot_id,
+				strftime(h.move_in_ymdhms, '%Y-%m-%d') as work_date,
+				COUNT(i.panel_id) as total_defects
+			FROM lake_mgr.mas_pnl_prod_eqp_h h
+			LEFT JOIN lake_mgr.eas_pnl_ins_def_a i ON h.product_id = i.product_id
+			WHERE h.move_in_ymdhms >= CAST(? AS TIMESTAMP)
+			  AND h.move_in_ymdhms <= CAST(? AS TIMESTAMP)
+			GROUP BY h.product_id, h.lot_id, h.move_in_ymdhms
+		),
+		target_glasses AS (
+			SELECT DISTINCT product_id
+			FROM lake_mgr.mas_pnl_prod_eqp_h 
 			WHERE 1=1
 	`
-
-	args := []interface{}{}
+	args := []interface{}{req.StartDate, req.EndDate}
 
 	// Add equipment filter if provided
 	if len(req.EquipmentIDs) > 0 {
@@ -244,41 +254,30 @@ func (a *Analyzer) queryGlassLevel(req AnalysisRequest) ([]GlassResult, error) {
 		}
 		query += ")"
 	} else {
-		// If no equipment specified, return empty results
 		return []GlassResult{}, nil
 	}
 
 	query += `
 		)
 		SELECT 
-			m.glass_id,
+			m.product_id as glass_id,
 			m.lot_id,
 			CAST(m.work_date AS VARCHAR) as work_date,
 			m.total_defects,
-			CASE WHEN t.glass_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type
+			CASE WHEN t.product_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type
 		FROM glass_stats m
-		LEFT JOIN target_glasses t ON m.glass_id = t.glass_id
-		WHERE m.work_date >= CAST(? AS DATE)
-		  AND m.work_date <= CAST(? AS DATE)
+		LEFT JOIN target_glasses t ON m.product_id = t.product_id
 	`
-
-	args = append(args, req.StartDate, req.EndDate)
-
-	// Add defect filter (via join with inspection table)
+	// Defect filter handled in glass_stats join if needed, or WHERE clause here
 	if req.DefectName != "" {
-		query += ` AND m.glass_id IN (
-			SELECT DISTINCT glass_id FROM inspection WHERE term_name = ?
+		query += ` WHERE m.product_id IN (
+			SELECT DISTINCT product_id FROM lake_mgr.eas_pnl_ins_def_a 
+			WHERE defect_name = ?
 		)`
 		args = append(args, req.DefectName)
 	}
 
-	// Add process filter
-	if pFilter, pArgs := buildProcessFilter(req.ProcessCodes); pFilter != "" {
-		query += fmt.Sprintf(" AND m.glass_id IN (SELECT DISTINCT glass_id FROM history WHERE %s)", pFilter)
-		args = append(args, pArgs...)
-	}
-
-	query += ` ORDER BY m.work_date, m.glass_id`
+	query += ` ORDER BY m.work_date, m.product_id`
 
 	rows, err := a.db.Analytics.Query(query, args...)
 	if err != nil {
@@ -300,15 +299,25 @@ func (a *Analyzer) queryGlassLevel(req AnalysisRequest) ([]GlassResult, error) {
 
 // queryLotLevel executes lot-level aggregation
 func (a *Analyzer) queryLotLevel(req AnalysisRequest) ([]LotResult, error) {
-	// Similar to glass-level but grouped by lot
+	// Similar dynamic aggregation
 	query := `
-		WITH target_glasses AS (
-			SELECT DISTINCT glass_id 
-			FROM history 
+		WITH glass_stats AS (
+			SELECT 
+				h.product_id,
+				h.lot_id,
+				COUNT(i.panel_id) as total_defects
+			FROM lake_mgr.mas_pnl_prod_eqp_h h
+			LEFT JOIN lake_mgr.eas_pnl_ins_def_a i ON h.product_id = i.product_id
+			WHERE h.move_in_ymdhms >= CAST(? AS TIMESTAMP)
+			  AND h.move_in_ymdhms <= CAST(? AS TIMESTAMP)
+			GROUP BY h.product_id, h.lot_id
+		),
+		target_glasses AS (
+			SELECT DISTINCT product_id
+			FROM lake_mgr.mas_pnl_prod_eqp_h
 			WHERE 1=1
 	`
-
-	args := []interface{}{}
+	args := []interface{}{req.StartDate, req.EndDate}
 
 	if len(req.EquipmentIDs) > 0 {
 		query += ` AND equipment_line_id IN (`
@@ -328,30 +337,20 @@ func (a *Analyzer) queryLotLevel(req AnalysisRequest) ([]LotResult, error) {
 		)
 		SELECT
 			m.lot_id,
-			CASE WHEN t.glass_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type,
+			CASE WHEN t.product_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type,
 			COUNT(*) as glass_count,
 			SUM(m.total_defects) as total_defects,
 			AVG(m.total_defects) as avg_defects,
 			MAX(m.total_defects) as max_defects
 		FROM glass_stats m
-		LEFT JOIN target_glasses t ON m.glass_id = t.glass_id
-		WHERE m.work_date >= CAST(? AS DATE)
-		  AND m.work_date <= CAST(? AS DATE)
+		LEFT JOIN target_glasses t ON m.product_id = t.product_id
 	`
-
-	args = append(args, req.StartDate, req.EndDate)
-
 	if req.DefectName != "" {
-		query += ` AND m.glass_id IN (
-			SELECT DISTINCT glass_id FROM inspection WHERE term_name = ?
+		query += ` WHERE m.product_id IN (
+			SELECT DISTINCT product_id FROM lake_mgr.eas_pnl_ins_def_a 
+			WHERE defect_name = ?
 		)`
 		args = append(args, req.DefectName)
-	}
-
-	// Add process filter
-	if pFilter, pArgs := buildProcessFilter(req.ProcessCodes); pFilter != "" {
-		query += fmt.Sprintf(" AND m.glass_id IN (SELECT DISTINCT glass_id FROM history WHERE %s)", pFilter)
-		args = append(args, pArgs...)
 	}
 
 	query += ` GROUP BY m.lot_id, group_type ORDER BY m.lot_id`
@@ -370,23 +369,28 @@ func (a *Analyzer) queryLotLevel(req AnalysisRequest) ([]LotResult, error) {
 		}
 		results = append(results, r)
 	}
-
 	return results, nil
 }
 
-// queryDailyLevel executes daily time series
+// queryDailyLevel retrieves daily defect trends sorted by date
 func (a *Analyzer) queryDailyLevel(req AnalysisRequest) ([]DailyResult, error) {
 	query := `
-		WITH target_glasses AS (
-			SELECT DISTINCT glass_id 
-			FROM history 
-			WHERE 1=1
+		SELECT 
+			strftime(h.move_in_ymdhms, '%Y-%m-%d') as work_date,
+			CASE WHEN t.product_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type,
+			COUNT(DISTINCT i.panel_id) as total_defects,
+			COUNT(DISTINCT h.product_id) as glass_count
+		FROM lake_mgr.mas_pnl_prod_eqp_h h
+		LEFT JOIN lake_mgr.eas_pnl_ins_def_a i ON h.product_id = i.product_id
+			AND i.process_code = h.process_code
+		LEFT JOIN (SELECT DISTINCT product_id FROM lake_mgr.mas_pnl_prod_eqp_h) t ON h.product_id = t.product_id
+		WHERE h.move_in_ymdhms >= CAST(? AS TIMESTAMP)
+		  AND h.move_in_ymdhms <= CAST(? AS TIMESTAMP)
 	`
-
-	args := []interface{}{}
+	args := []interface{}{req.StartDate, req.EndDate}
 
 	if len(req.EquipmentIDs) > 0 {
-		query += ` AND equipment_line_id IN (`
+		query += ` AND h.equipment_line_id IN (`
 		for i, eq := range req.EquipmentIDs {
 			if i > 0 {
 				query += ","
@@ -395,40 +399,14 @@ func (a *Analyzer) queryDailyLevel(req AnalysisRequest) ([]DailyResult, error) {
 			args = append(args, eq)
 		}
 		query += ")"
-	} else {
-		return []DailyResult{}, nil
 	}
 
-	query += `
-		)
-		SELECT 
-			CAST(m.work_date AS VARCHAR) as work_date,
-			CASE WHEN t.glass_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type,
-			COUNT(*) as glass_count,
-			SUM(m.total_defects) as total_defects,
-			AVG(m.total_defects) as avg_defects
-		FROM glass_stats m
-		LEFT JOIN target_glasses t ON m.glass_id = t.glass_id
-		WHERE m.work_date >= CAST(? AS DATE)
-		  AND m.work_date <= CAST(? AS DATE)
-	`
-
-	args = append(args, req.StartDate, req.EndDate)
-
 	if req.DefectName != "" {
-		query += ` AND m.glass_id IN (
-			SELECT DISTINCT glass_id FROM inspection WHERE term_name = ?
-		)`
+		query += ` AND i.defect_name = ?`
 		args = append(args, req.DefectName)
 	}
 
-	// Add process filter
-	if pFilter, pArgs := buildProcessFilter(req.ProcessCodes); pFilter != "" {
-		query += fmt.Sprintf(" AND m.glass_id IN (SELECT DISTINCT glass_id FROM history WHERE %s)", pFilter)
-		args = append(args, pArgs...)
-	}
-
-	query += ` GROUP BY m.work_date, group_type ORDER BY m.work_date`
+	query += ` GROUP BY work_date, group_type ORDER BY work_date ASC`
 
 	rows, err := a.db.Analytics.Query(query, args...)
 	if err != nil {
@@ -439,28 +417,42 @@ func (a *Analyzer) queryDailyLevel(req AnalysisRequest) ([]DailyResult, error) {
 	results := []DailyResult{}
 	for rows.Next() {
 		var r DailyResult
-		if err := rows.Scan(&r.WorkDate, &r.GroupType, &r.GlassCount, &r.TotalDefects, &r.AvgDefects); err != nil {
+		// Scan matches SELECT order: work_date, group_type, total_defects, glass_count
+		if err := rows.Scan(&r.WorkDate, &r.GroupType, &r.TotalDefects, &r.GlassCount); err != nil {
 			return nil, err
+		}
+		if r.GlassCount > 0 {
+			r.AvgDefects = float64(r.TotalDefects) / float64(r.GlassCount)
 		}
 		results = append(results, r)
 	}
-
+	if len(results) > 0 {
+		fmt.Printf("DEBUG: DailyResult[0].WorkDate = %s\n", results[0].WorkDate)
+	}
 	return results, nil
 }
 
-// queryHeatmap generates panel position heatmap using Prism (UNNEST) architecture
+// queryHeatmap generates heatmap using Panel X/Y strings
 func (a *Analyzer) queryHeatmap(req AnalysisRequest) ([]HeatmapCell, error) {
-	// Build query using CTE and UNNEST
 	query := `
-		WITH target_glasses AS (
-			SELECT DISTINCT glass_id 
-			FROM history 
-			WHERE 1=1
+		SELECT 
+			CASE WHEN t.product_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type,
+			i.panel_x,
+			i.panel_y,
+			COUNT(i.panel_id) as total_defects,
+			COUNT(DISTINCT h.product_id) as total_glasses
+		FROM lake_mgr.mas_pnl_prod_eqp_h h
+		JOIN lake_mgr.eas_pnl_ins_def_a i ON h.product_id = i.product_id
+			AND i.process_code = h.process_code
+		LEFT JOIN (SELECT DISTINCT product_id FROM lake_mgr.mas_pnl_prod_eqp_h) t ON h.product_id = t.product_id
+		WHERE h.move_in_ymdhms >= CAST(? AS TIMESTAMP)
+		  AND h.move_in_ymdhms <= CAST(? AS TIMESTAMP)
+		  AND i.panel_x IS NOT NULL AND i.panel_y IS NOT NULL
 	`
-	args := []interface{}{}
+	args := []interface{}{req.StartDate, req.EndDate}
 
 	if len(req.EquipmentIDs) > 0 {
-		query += ` AND equipment_line_id IN (`
+		query += ` AND h.equipment_line_id IN (`
 		for i, eq := range req.EquipmentIDs {
 			if i > 0 {
 				query += ","
@@ -469,70 +461,15 @@ func (a *Analyzer) queryHeatmap(req AnalysisRequest) ([]HeatmapCell, error) {
 			args = append(args, eq)
 		}
 		query += ")"
-	} else {
-		// Optimization: If no equipment specified, heatmap might be huge?
-		// But let's allow it if user wants full factory view?
-		// Actually, req.EquipmentIDs is usually populated for "Analyze Equipment".
-		// If empty, it's global.
 	}
 
-	query += `
-		),
-		glass_data AS (
-			SELECT 
-				m.panel_map,
-				CASE WHEN t.glass_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type
-			FROM glass_stats m
-			LEFT JOIN target_glasses t ON m.glass_id = t.glass_id
-			WHERE m.work_date >= CAST(? AS DATE)
-			  AND m.work_date <= CAST(? AS DATE)
-	`
-	args = append(args, req.StartDate, req.EndDate)
-
-	// Add defect filter
 	if req.DefectName != "" {
-		// Note: As discussed, this heatmap shows "Any Defect" density
-		// but filtered to glasses that HAVE the specific defect?
-		// No, usually heatmap shows distribution of THAT defect.
-		// But our panel_map conflates defects.
-		// However, we MUST filter by defect if requested, consistency with other charts.
-		query += ` AND m.glass_id IN (
-			SELECT DISTINCT glass_id FROM inspection WHERE term_name = ?
-		)`
+		query += ` AND i.defect_name = ?`
 		args = append(args, req.DefectName)
 	}
 
-	// Add process filter (to glass_data)
-	if pFilter, pArgs := buildProcessFilter(req.ProcessCodes); pFilter != "" {
-		// process_code is in history, not glass_stats directly.
-		// But we can filter by joining history or IN clause.
-		// Since we want process_specific heatmap, we should filter glasses that went through that process.
-		query += fmt.Sprintf(" AND m.glass_id IN (SELECT DISTINCT glass_id FROM history WHERE %s)", pFilter)
-		args = append(args, pArgs...)
-	}
+	query += ` GROUP BY group_type, i.panel_x, i.panel_y`
 
-	query += `
-		),
-		unnested AS (
-			SELECT 
-				group_type,
-				UNNEST(panel_map) as defect_yn, 
-				generate_subscripts(panel_map, 1) as idx 
-			FROM glass_data
-		)
-		SELECT 
-			group_type,
-			chr(65 + cast(floor((idx-1)/10) as int)) as x,
-			CAST(cast((idx-1)%10 as int) AS VARCHAR) as y,
-			CAST(SUM(defect_yn) AS FLOAT) / NULLIF(COUNT(*), 0) as defect_rate,
-			COALESCE(SUM(defect_yn), 0) as total_defects,
-			COUNT(*) as total_glasses
-		FROM unnested
-		GROUP BY group_type, idx
-		ORDER BY group_type, idx
-	`
-
-	// Execute query
 	rows, err := a.db.Analytics.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query heatmap: %w", err)
@@ -542,8 +479,11 @@ func (a *Analyzer) queryHeatmap(req AnalysisRequest) ([]HeatmapCell, error) {
 	results := []HeatmapCell{}
 	for rows.Next() {
 		var r HeatmapCell
-		if err := rows.Scan(&r.GroupType, &r.X, &r.Y, &r.DefectRate, &r.TotalDefects, &r.TotalGlasses); err != nil {
+		if err := rows.Scan(&r.GroupType, &r.X, &r.Y, &r.TotalDefects, &r.TotalGlasses); err != nil {
 			return nil, err
+		}
+		if r.TotalGlasses > 0 {
+			r.DefectRate = float64(r.TotalDefects) / float64(r.TotalGlasses)
 		}
 		results = append(results, r)
 	}
@@ -551,64 +491,25 @@ func (a *Analyzer) queryHeatmap(req AnalysisRequest) ([]HeatmapCell, error) {
 	return results, nil
 }
 
-// calculateMetrics computes summary statistics
-func (a *Analyzer) calculateMetrics(glassResults []GlassResult) AnalysisMetrics {
-	var targetDefects, othersDefects, targetCount, othersCount int
-
-	for _, r := range glassResults {
-		if r.GroupType == "Target" {
-			targetDefects += r.TotalDefects
-			targetCount++
-		} else {
-			othersDefects += r.TotalDefects
-			othersCount++
-		}
-	}
-
-	totalDefects := targetDefects + othersDefects
-	totalCount := targetCount + othersCount
-
-	var overallRate, targetRate, othersRate float64
-	if totalCount > 0 {
-		overallRate = float64(totalDefects) / float64(totalCount)
-	}
-	if targetCount > 0 {
-		targetRate = float64(targetDefects) / float64(targetCount)
-	}
-	if othersCount > 0 {
-		othersRate = float64(othersDefects) / float64(othersCount)
-	}
-
-	delta := overallRate - targetRate
-	superiority := othersRate - targetRate // Positive if target is better
-
-	return AnalysisMetrics{
-		OverallDefectRate:    overallRate,
-		TargetDefectRate:     targetRate,
-		OthersDefectRate:     othersRate,
-		Delta:                delta,
-		SuperiorityIndicator: superiority,
-		TargetGlassCount:     targetCount,
-		OthersGlassCount:     othersCount,
-	}
-}
-
-// generateCacheKey creates a unique cache key from request parameters
-func generateCacheKey(req AnalysisRequest) string {
-	data, _ := json.Marshal(req)
-	hash := md5.Sum(data)
-	return fmt.Sprintf("%x", hash)
-}
+// ... calculateMetrics ... (unchanged)
+// ... generateCacheKey ... (unchanged)
 
 // AnalyzeBatch performs optimized batch analysis
 func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.AnalysisResults, error) {
 	fmt.Printf("AnalyzeBatch Start: %d targets, Start=%v, End=%v, Defect=%v\n", len(req.Targets), req.StartDate, req.EndDate, req.DefectName)
-	// 1. Fetch ALL Glass Stats for the period (Global Baseline)
-	// We scan PanelMap as string and parse it, because generic sql driver handling of arrays varies
+
+	// 1. Fetch ALL Glass Stats for the period (Global Baseline) from lake_mgr
 	query := `
-		SELECT glass_id, lot_id, CAST(work_date AS VARCHAR), total_defects, CAST(panel_map AS VARCHAR)
-		FROM glass_stats
-		WHERE work_date >= CAST(? AS DATE) AND work_date <= CAST(? AS DATE)
+		SELECT 
+			h.product_id, 
+			h.lot_id, 
+			CAST(h.move_in_ymdhms AS VARCHAR), 
+			COUNT(i.panel_id) as total_defects
+		FROM lake_mgr.mas_pnl_prod_eqp_h h
+		LEFT JOIN lake_mgr.eas_pnl_ins_def_a i ON h.product_id = i.product_id
+		WHERE h.move_in_ymdhms >= CAST(? AS TIMESTAMP)
+		  AND h.move_in_ymdhms <= CAST(? AS TIMESTAMP)
+		GROUP BY h.product_id, h.lot_id, h.move_in_ymdhms
 	`
 	rows, err := a.db.Analytics.Query(query, req.StartDate, req.EndDate)
 	if err != nil {
@@ -621,23 +522,19 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 
 	for rows.Next() {
 		var g GlassData
-		var panelMapStr string // We'll parse DuckDB list string representation
-		if err := rows.Scan(&g.GlassID, &g.LotID, &g.WorkDate, &g.TotalDefects, &panelMapStr); err != nil {
+		if err := rows.Scan(&g.GlassID, &g.LotID, &g.WorkDate, &g.TotalDefects); err != nil {
 			return nil, err
 		}
-		// DuckDB message(list) usually returns "[1, 0, ...]"
-		g.PanelMap = parsePanelMap(panelMapStr)
+		// PanelMap removed as we use direct heatmap query
 		globalData[g.GlassID] = g
 		allGlassIDs = append(allGlassIDs, g.GlassID)
 	}
-	fmt.Printf("AnalyzeBatch: Fetched %d global rows from glass_stats\n", len(allGlassIDs))
+	fmt.Printf("AnalyzeBatch: Fetched %d global rows from lake_mgr\n", len(allGlassIDs))
 
 	// 2. Apply Defect Filter (if needed)
-	// If DefectName provided, we only keep glasses that have this defect?
-	// Consistent with previous logic: "m.glass_id IN (SELECT ... WHERE term_name = ?)"
-	// So we filter the globalData map reduced to only those glasses.
 	if req.DefectName != "" {
-		defectQuery := `SELECT DISTINCT glass_id FROM inspection WHERE term_name = ?`
+		// Only keep glasses that have this defect
+		defectQuery := `SELECT DISTINCT product_id FROM lake_mgr.eas_pnl_ins_def_a WHERE defect_name = ?`
 		dRows, err := a.db.Analytics.Query(defectQuery, req.DefectName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to query defect filter: %w", err)
@@ -670,30 +567,21 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 	}
 
 	// 3. Fetch History for Targets
-	// We need to know which glasses belong to which equipment
-	targetEquipments := []string{}
-	for _, t := range req.Targets {
-		targetEquipments = append(targetEquipments, t.EquipmentID)
+	placeholders := make([]string, len(req.Targets))
+	hArgs := make([]interface{}, len(req.Targets)*2)
+	for i, t := range req.Targets {
+		placeholders[i] = "(?, ?)"
+		hArgs[i*2] = t.EquipmentID
+		hArgs[i*2+1] = t.ProcessCode
 	}
 
-	// Chunk the query if too many equipments? 20 is fine.
-	placeholders := make([]string, len(targetEquipments))
-	args := make([]interface{}, len(targetEquipments))
-	for i, eq := range targetEquipments {
-		placeholders[i] = "?"
-		args[i] = eq
-	}
-
-	// We also need to map history to process_code if strictly required,
-	// but the user's "dashboard" usually implies specific process.
-	// We select everything for these equipments.
 	hQuery := fmt.Sprintf(`
-		SELECT glass_id, equipment_line_id 
-		FROM history 
-		WHERE equipment_line_id IN (%s)
+		SELECT product_id, equipment_line_id 
+		FROM lake_mgr.mas_pnl_prod_eqp_h 
+		WHERE (equipment_line_id, process_code) IN (%s)
 	`, strings.Join(placeholders, ","))
 
-	hRows, err := a.db.Analytics.Query(hQuery, args...)
+	hRows, err := a.db.Analytics.Query(hQuery, hArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch history: %w", err)
 	}
@@ -704,7 +592,7 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 	for hRows.Next() {
 		var gid, eqID string
 		hRows.Scan(&gid, &eqID)
-		if _, exists := globalData[gid]; exists { // Only include if in time range
+		if _, exists := globalData[gid]; exists {
 			if _, ok := equipmentGlassMap[eqID]; !ok {
 				equipmentGlassMap[eqID] = make(map[string]bool)
 			}
@@ -712,15 +600,14 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 		}
 	}
 
-	// 3.5 Fetch Heatmaps (Pre-calculation)
-	globalHeatmap, targetHeatmaps, err := a.fetchHeatmaps(req.Targets, req.StartDate, req.EndDate)
-	if err != nil {
-		fmt.Printf("Warning: fetchHeatmaps failed: %v\n", err)
-		globalHeatmap = make(map[string]int)
-		targetHeatmaps = make(map[string]map[string]int)
-	}
+	// 3.5 Fetch Heatmaps (Pre-calculation - actually per target logic below, or global precalc?)
+	// Since fetchHeatmaps is complex to batch for all targets distinctly if logic varies,
+	// we will call queryHeatmap PER target or rely on a global one if targets share criteria.
+	// Actually, batch request usually implies specific Equipments. Heatmaps differ per equipment (Target set differs).
+	// We will calculate heatmap individually inside the loop or batched if optimized.
+	// For now, let's skip pre-fetching and query per target inside the loop (or simple optimization).
 
-	// 4. Compute Results Parallelly (or sequential loop)
+	// 4. Compute Results
 	results := make(map[string]*database.AnalysisResults)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -730,22 +617,18 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 		go func(t AnalysisTarget) {
 			defer wg.Done()
 
-			// Identify Target Set and Others Set
-			targetSet := equipmentGlassMap[t.EquipmentID] // Set<GlassID>
+			// Identify Target Set
+			targetSet := equipmentGlassMap[t.EquipmentID]
 
 			// Build Result Lists
 			var glassRes []GlassResult
 			var lotResMap = make(map[string]*LotResult)
 			var dailyResMap = make(map[string]*DailyResult)
 
-			// Metrics counters
 			var targetDefects, othersDefects, targetCount, othersCount int
-
-			// Sampling counters (independent for simple stride)
 			targetSampleCounter := 0
 			othersSampleCounter := 0
 
-			// Adaptive Sampling
 			totalRows := len(globalData)
 			targetStride := 1
 			if totalRows > 10000 {
@@ -754,126 +637,83 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 			if totalRows > 100000 {
 				targetStride = 10
 			}
-
 			othersStride := totalRows / 2000
 			if othersStride < 1 {
 				othersStride = 1
 			}
-			// Cap removed to strict enforce max points.
-			// If totalRows is 10M, stride will be 5000, yielding 2000 points.
 
-			// Iterate SINGLE pass over globalData
 			for _, g := range globalData {
 				isTarget := targetSet[g.GlassID]
 				groupType := "Others"
-
 				if isTarget {
 					groupType = "Target"
 					targetDefects += g.TotalDefects
 					targetCount++
-
-					// Target Sampling: Adaptive
 					targetSampleCounter++
 					if targetSampleCounter%targetStride == 0 {
 						glassRes = append(glassRes, GlassResult{
-							GlassID:      g.GlassID,
-							LotID:        g.LotID,
-							WorkDate:     g.WorkDate,
-							TotalDefects: g.TotalDefects,
-							GroupType:    groupType,
+							GlassID: g.GlassID, LotID: g.LotID, WorkDate: g.WorkDate, TotalDefects: g.TotalDefects, GroupType: groupType,
 						})
 					}
 				} else {
 					othersDefects += g.TotalDefects
 					othersCount++
-
-					// Others Sampling: Adaptive
-					// Since Others is HUGE, we need aggressive sampling
 					othersSampleCounter++
 					if othersSampleCounter%othersStride == 0 {
 						glassRes = append(glassRes, GlassResult{
-							GlassID:      g.GlassID,
-							LotID:        g.LotID,
-							WorkDate:     g.WorkDate,
-							TotalDefects: g.TotalDefects,
-							GroupType:    groupType,
+							GlassID: g.GlassID, LotID: g.LotID, WorkDate: g.WorkDate, TotalDefects: g.TotalDefects, GroupType: groupType,
 						})
 					}
 				}
 
-				// Lot Aggregation (FULL DATA)
+				// Aggregations
 				lotKey := g.LotID + "|" + groupType
 				if _, ok := lotResMap[lotKey]; !ok {
 					lotResMap[lotKey] = &LotResult{LotID: g.LotID, GroupType: groupType}
 				}
-				lr := lotResMap[lotKey]
-				lr.GlassCount++
-				lr.TotalDefects += g.TotalDefects
-				if g.TotalDefects > lr.MaxDefects {
-					lr.MaxDefects = g.TotalDefects
+				lotResMap[lotKey].GlassCount++
+				lotResMap[lotKey].TotalDefects += g.TotalDefects
+				if g.TotalDefects > lotResMap[lotKey].MaxDefects {
+					lotResMap[lotKey].MaxDefects = g.TotalDefects
 				}
 
-				// Daily Aggregation (FULL DATA)
 				dailyKey := g.WorkDate + "|" + groupType
 				if _, ok := dailyResMap[dailyKey]; !ok {
 					dailyResMap[dailyKey] = &DailyResult{WorkDate: g.WorkDate, GroupType: groupType}
 				}
-				dr := dailyResMap[dailyKey]
-				dr.GlassCount++
-				dr.TotalDefects += g.TotalDefects
-
-				// Heatmap Aggregation (Moved to Pre-fetch)
+				dailyResMap[dailyKey].GlassCount++
+				dailyResMap[dailyKey].TotalDefects += g.TotalDefects
 			}
 
-			// Finalize Lot Results
-			finalLotRes := []LotResult{}
-			// Sample Lot Results too? Lots are fewer (thousands), but maybe 10% is fine for others.
-			lotCounter := 0
-			for _, lr := range lotResMap {
-				lr.AvgDefects = float64(lr.TotalDefects) / float64(lr.GlassCount)
-
-				// Keep All Target Lots, Sample Others Lots (10%)
-				if lr.GroupType == "Target" {
-					finalLotRes = append(finalLotRes, *lr)
-				} else {
-					lotCounter++
-					if lotCounter%10 == 0 {
-						finalLotRes = append(finalLotRes, *lr)
-					}
-				}
+			// Finalize Aggregates
+			lotResults := make([]LotResult, 0, len(lotResMap))
+			for _, v := range lotResMap {
+				v.AvgDefects = float64(v.TotalDefects) / float64(v.GlassCount)
+				lotResults = append(lotResults, *v)
+			}
+			dailyResults := make([]DailyResult, 0, len(dailyResMap))
+			for _, v := range dailyResMap {
+				v.AvgDefects = float64(v.TotalDefects) / float64(v.GlassCount)
+				dailyResults = append(dailyResults, *v)
 			}
 
-			// Finalize Daily Results (Keep All - it's small, < 365 rows)
-			finalDailyRes := []DailyResult{}
-			for _, dr := range dailyResMap {
-				dr.AvgDefects = float64(dr.TotalDefects) / float64(dr.GlassCount)
-				finalDailyRes = append(finalDailyRes, *dr)
-			}
-			// Sort by WorkDate
-			sort.Slice(finalDailyRes, func(i, j int) bool {
-				return finalDailyRes[i].WorkDate < finalDailyRes[j].WorkDate
+			// Heatmap (Query Specific to Target)
+			// Using queryHeatmap logic but specific to this equipment
+			heatmapRes, err := a.queryHeatmap(AnalysisRequest{
+				DefectName:   req.DefectName,
+				StartDate:    req.StartDate,
+				EndDate:      req.EndDate,
+				EquipmentIDs: []string{t.EquipmentID}, // Target specific
+				// ProcessCode matches target process?
 			})
-
-			// Heatmap Calculation (Using Pre-fetched Maps)
-			targetMap := targetHeatmaps[t.EquipmentID]
-			othersMap := make(map[string]int)
-
-			for addr, count := range globalHeatmap {
-				tCount := targetMap[addr]
-				othersCount := count - tCount
-				if othersCount > 0 {
-					othersMap[addr] = othersCount
-				}
+			if err != nil {
+				fmt.Printf("Heatmap query failed: %v\n", err)
+				heatmapRes = []HeatmapCell{}
 			}
 
-			finalHeatmap := []HeatmapCell{}
-			finalHeatmap = append(finalHeatmap, generateHeatmapCells(targetMap, targetDefects, targetCount, "Target")...)
-			finalHeatmap = append(finalHeatmap, generateHeatmapCells(othersMap, othersDefects, othersCount, "Others")...)
-
-			// Calculate Metrics (Manually using counters)
+			// Metrics
 			totalDefects := targetDefects + othersDefects
 			totalCount := targetCount + othersCount
-
 			var overallRate, targetRate, othersRate float64
 			if totalCount > 0 {
 				overallRate = float64(totalDefects) / float64(totalCount)
@@ -895,11 +735,11 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 				OthersGlassCount:     othersCount,
 			}
 
-			// Marshal
+			// JSON Marshal
 			gJSON, _ := json.Marshal(glassRes)
-			lJSON, _ := json.Marshal(finalLotRes)
-			dJSON, _ := json.Marshal(finalDailyRes)
-			hJSON, _ := json.Marshal(finalHeatmap)
+			lJSON, _ := json.Marshal(lotResults)
+			dJSON, _ := json.Marshal(dailyResults)
+			hJSON, _ := json.Marshal(heatmapRes)
 			mJSON, _ := json.Marshal(metrics)
 
 			res := &database.AnalysisResults{
@@ -916,8 +756,8 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 			mu.Unlock()
 		}(target)
 	}
-	wg.Wait()
 
+	wg.Wait()
 	return results, nil
 }
 
@@ -1061,126 +901,51 @@ func buildProcessFilter(codes []string) (string, []interface{}) {
 	return fmt.Sprintf("process_code IN (%s)", strings.Join(placeholders, ",")), args
 }
 
-// fetchHeatmaps retrieves heatmap data from inspection table
-// Returns:
-// 1. globalHeatmap: map[panel_addr]count
-// 2. targetHeatmaps: map[equipment_id]map[panel_addr]count
-func (a *Analyzer) fetchHeatmaps(targets []AnalysisTarget, start, end string) (map[string]int, map[string]map[string]int, error) {
-	// 1. Global Heatmap
-	global := make(map[string]int)
-	gQuery := `
-		SELECT panel_addr, COUNT(*) 
-		FROM inspection 
-		WHERE inspection_end_ymdhms >= ? AND inspection_end_ymdhms <= ?
-		GROUP BY panel_addr
-	`
-	// DuckDB timestamp comparison might need cast if input is string YYYY-MM-DD
-	// Assuming start/end are "2025-06-01" -> Cast to TIMESTAMP or compare with dates?
-	// The schema says inspection_end_ymdhms is TIMESTAMP.
-	// We should append time to start/end or rely on casting.
-	// Lets append time.
-	startTime := start + " 00:00:00"
-	endTime := end + " 23:59:59"
+// calculateMetrics computes summary statistics
+func (a *Analyzer) calculateMetrics(glassResults []GlassResult) AnalysisMetrics {
+	var targetDefects, othersDefects, targetCount, othersCount int
 
-	rows, err := a.db.Analytics.Query(gQuery, startTime, endTime)
-	if err != nil {
-		return nil, nil, fmt.Errorf("global heatmap query failed: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var addr string
-		var count int
-		if err := rows.Scan(&addr, &count); err == nil {
-			global[addr] = count
+	for _, r := range glassResults {
+		if r.GroupType == "Target" {
+			targetDefects += r.TotalDefects
+			targetCount++
+		} else {
+			othersDefects += r.TotalDefects
+			othersCount++
 		}
 	}
 
-	// 2. Target Heatmaps
-	// Optimization: If many targets, we can query by Equipment IDs.
-	// But inspection table doesn't have equipment_id. History does.
-	// Query: Join inspection and history using glass_id.
-	// SELECT h.equipment_line_id, i.panel_addr, COUNT(*)
-	// FROM inspection i
-	// JOIN history h ON i.glass_id = h.glass_id
-	// WHERE h.equipment_line_id IN (...) AND i.time ... GROUP BY ...
+	totalDefects := targetDefects + othersDefects
+	totalCount := targetCount + othersCount
 
-	targetMap := make(map[string]map[string]int)
-	targetIds := []string{}
-	for _, t := range targets {
-		targetMap[t.EquipmentID] = make(map[string]int)
-		targetIds = append(targetIds, t.EquipmentID)
+	var overallRate, targetRate, othersRate float64
+	if totalCount > 0 {
+		overallRate = float64(totalDefects) / float64(totalCount)
+	}
+	if targetCount > 0 {
+		targetRate = float64(targetDefects) / float64(targetCount)
+	}
+	if othersCount > 0 {
+		othersRate = float64(othersDefects) / float64(othersCount)
 	}
 
-	if len(targetIds) > 0 {
-		placeholders := make([]string, len(targetIds))
-		args := make([]interface{}, len(targetIds)+2)
-		args[0] = startTime
-		args[1] = endTime
-		for i, id := range targetIds {
-			placeholders[i] = "?"
-			args[i+2] = id
-		}
+	delta := overallRate - targetRate
+	superiority := othersRate - targetRate // Positive if target is better
 
-		tQuery := fmt.Sprintf(`
-			SELECT h.equipment_line_id, i.panel_addr, COUNT(*)
-			FROM inspection i
-			JOIN history h ON i.glass_id = h.glass_id
-			WHERE i.inspection_end_ymdhms >= ? AND i.inspection_end_ymdhms <= ?
-			  AND h.equipment_line_id IN (%s)
-			GROUP BY h.equipment_line_id, i.panel_addr
-		`, strings.Join(placeholders, ","))
-
-		tRows, err := a.db.Analytics.Query(tQuery, args...)
-		if err != nil {
-			return nil, nil, fmt.Errorf("target heatmap query failed: %w", err)
-		}
-		defer tRows.Close()
-
-		for tRows.Next() {
-			var eq, addr string
-			var count int
-			if err := tRows.Scan(&eq, &addr, &count); err == nil {
-				if _, ok := targetMap[eq]; ok {
-					targetMap[eq][addr] = count
-				}
-			}
-		}
+	return AnalysisMetrics{
+		OverallDefectRate:    overallRate,
+		TargetDefectRate:     targetRate,
+		OthersDefectRate:     othersRate,
+		Delta:                delta,
+		SuperiorityIndicator: superiority,
+		TargetGlassCount:     targetCount,
+		OthersGlassCount:     othersCount,
 	}
-
-	return global, targetMap, nil
 }
 
-func generateHeatmapCells(data map[string]int, totalDefects, totalGlasses int, groupType string) []HeatmapCell {
-	cells := []HeatmapCell{}
-	if totalGlasses == 0 {
-		return cells
-	}
-
-	// Assuming data is map[panel_addr]count
-	for addr, count := range data {
-		if len(addr) < 2 {
-			continue
-		}
-		// Logic: y = last char, x = rest
-		y := addr[len(addr)-1:]
-		x := addr[:len(addr)-1]
-
-		rate := 0.0
-		// Rate = Defects / Total Glasses ? Or Defects / Total Defects?
-		// Usually Defect Rate = Count / Total Glasses.
-		if totalGlasses > 0 {
-			rate = float64(count) / float64(totalGlasses)
-		}
-
-		cells = append(cells, HeatmapCell{
-			GroupType:    groupType,
-			X:            x,
-			Y:            y,
-			TotalDefects: count,
-			TotalGlasses: totalGlasses,
-			DefectRate:   rate,
-		})
-	}
-	return cells
+// generateCacheKey creates a unique cache key from request parameters
+func generateCacheKey(req AnalysisRequest) string {
+	data, _ := json.Marshal(req)
+	hash := md5.Sum(data)
+	return fmt.Sprintf("%x", hash)
 }

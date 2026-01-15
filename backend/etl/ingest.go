@@ -66,48 +66,92 @@ func (d *DataIngestor) ingestMockData() (map[string]int, error) {
 }
 
 // TransformInspection transforms raw inspection data
-// Computes defect_name from term_name and panel_addr from panel_id
+// Computes defect_name from term_name and handles coordinates
 func TransformInspection(raw map[string]interface{}) (database.InspectionRow, error) {
 	row := database.InspectionRow{}
 
 	// Extract fields
-	if v, ok := raw["glass_id"].(string); ok {
-		row.GlassID = v
+	// Helper: ProductID from product_id or glass_id (legacy)
+	if v, ok := raw["product_id"].(string); ok {
+		row.ProductID = v
+	} else if v, ok := raw["glass_id"].(string); ok { // Legacy support
+		row.ProductID = v
 	}
+
 	if v, ok := raw["panel_id"].(string); ok {
 		row.PanelID = v
 	}
-	if v, ok := raw["product_id"].(string); ok {
-		row.ProductID = v
+	if v, ok := raw["model_code"].(string); ok {
+		row.ModelCode = v
 	}
-	if v, ok := raw["term_name"].(string); ok {
-		row.TermName = v
-		// Extract defect_name (elements 2 and 4)
+
+	// Term Name logic: Source Term -> Derived DefectName
+	if v, ok := raw["def_latest_summary_defect_term_name_s"].(string); ok {
+		row.DefectLatestSummaryDefectTermNameS = v
+		// Extract defect_name (elements 2 and 4, i.e., indices 1 and 3)
+		row.DefectName = extractDefectName(v)
+	} else if v, ok := raw["term_name"].(string); ok { // Legacy
+		row.DefectLatestSummaryDefectTermNameS = v
 		row.DefectName = extractDefectName(v)
 	}
+
+	// Panel Address Logic: panel_addr = panel_id - product_id
+	if row.PanelID != "" && row.ProductID != "" {
+		if strings.HasPrefix(row.PanelID, row.ProductID) {
+			row.PanelAddr = strings.TrimPrefix(row.PanelID, row.ProductID)
+			if len(row.PanelAddr) > 0 {
+				// X is all but last char, Y is last char
+				row.PanelX = row.PanelAddr[:len(row.PanelAddr)-1]
+				row.PanelY = row.PanelAddr[len(row.PanelAddr)-1:]
+			}
+		} else {
+			// Fallback if ID doesn't match expected pattern
+			row.PanelAddr = row.PanelID
+		}
+	}
+
 	if v, ok := raw["process_code"].(string); ok {
 		row.ProcessCode = v
 	}
-	if v, ok := raw["defect_count"].(int); ok {
-		row.DefectCount = v
-	}
+
+	// Inspection Time
 	if v, ok := raw["inspection_end_ymdhms"].(time.Time); ok {
 		row.InspectionEndYmdhms = v
+	} else if vStr, ok := raw["inspection_end_ymdhms"].(string); ok {
+		// Try parsing if string
+		if t, err := time.Parse(time.RFC3339, vStr); err == nil {
+			row.InspectionEndYmdhms = t
+		}
 	}
 
-	// Compute panel_addr
-	if row.PanelID != "" && row.ProductID != "" {
-		row.PanelAddr = strings.TrimPrefix(row.PanelID, row.ProductID)
+	// X/Y Coordinates
+	// Ensure float32 conversion from float64 (json default) or string
+	if v, ok := raw["def_pnt_x"].(float64); ok {
+		row.DefPntX = float32(v)
+	}
+	if v, ok := raw["def_pnt_y"].(float64); ok {
+		row.DefPntY = float32(v)
+	}
+
+	// G/D Integers
+	if v, ok := raw["def_pnt_g"].(float64); ok {
+		row.DefPntG = uint32(v)
+	}
+	if v, ok := raw["def_pnt_d"].(float64); ok {
+		row.DefPntD = uint32(v)
+	}
+	if v, ok := raw["def_size"].(float64); ok {
+		row.DefSize = float32(v)
 	}
 
 	return row, nil
 }
 
-// DeduplicateHistory keeps only the last occurrence per glass+process+equipment
+// DeduplicateHistory keeps only the last occurrence per product+process+equipment
 func DeduplicateHistory(history []database.HistoryRow) []database.HistoryRow {
 	// Build a map with composite key
 	type key struct {
-		glassID   string
+		productID string
 		process   string
 		equipment string
 	}
@@ -116,15 +160,14 @@ func DeduplicateHistory(history []database.HistoryRow) []database.HistoryRow {
 
 	for _, row := range history {
 		k := key{
-			glassID:   row.GlassID,
+			productID: row.ProductID,
 			process:   row.ProcessCode,
 			equipment: row.EquipmentLineID,
 		}
 
-		// Keep the one with highest seq_num, or latest time if seq_num is same
+		// Keep the one with latest time (seq_num removed/less relevant if strict time available)
 		if existing, exists := latest[k]; exists {
-			if row.SeqNum > existing.SeqNum ||
-				(row.SeqNum == existing.SeqNum && row.TimekeyYmdhms.After(existing.TimekeyYmdhms)) {
+			if row.MoveInYmdhms.After(existing.MoveInYmdhms) {
 				latest[k] = row
 			}
 		} else {
@@ -159,6 +202,8 @@ func executeTemplateQuery(queryTemplate string, params map[string]interface{}) (
 // extractDefectName extracts elements 2 and 4 from term_name (helper function)
 func extractDefectName(termName string) string {
 	parts := strings.Split(termName, "-")
+	// Expected format: TYPE-DEFECT-SIZE-REASON (e.g., TYPE1-SPOT-SIZE-DARK)
+	// We want parts[1] (SPOT) and parts[3] (DARK) -> SPOT-DARK
 	if len(parts) < 4 {
 		return termName
 	}

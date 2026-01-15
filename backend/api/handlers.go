@@ -328,32 +328,46 @@ func (h *Handler) GetAnalysisResults(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetInspectionData queries inspection data by time range (required) with optional filters
+// GetInspectionData queries inspection data by time range (required) with optional filters
 func (h *Handler) GetInspectionData(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
-	startTime := r.URL.Query().Get("start_time")
-	endTime := r.URL.Query().Get("end_time")
+	startTimeStr := r.URL.Query().Get("start_time")
+	endTimeStr := r.URL.Query().Get("end_time")
 	processCode := r.URL.Query().Get("process_code")
 	defectName := r.URL.Query().Get("defect_name")
 
-	// Validate required parameters
-	if startTime == "" || endTime == "" {
-		respondError(w, http.StatusBadRequest, "start_time and end_time are required (format: YYYY-MM-DD HH:MM:SS)")
+	if startTimeStr == "" || endTimeStr == "" {
+		respondError(w, http.StatusBadRequest, "start_time and end_time are required")
+		return
+	}
+
+	startTime, err := time.Parse(time.RFC3339, startTimeStr)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid start_time format")
+		return
+	}
+	endTime, err := time.Parse(time.RFC3339, endTimeStr)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid end_time format")
 		return
 	}
 
 	// Build query
 	query := `
 		SELECT 
-			glass_id,
-			panel_id,
 			product_id,
-			panel_addr,
-			term_name,
+			panel_id,
+			model_code,
+			def_latest_summary_defect_term_name_s,
 			defect_name,
 			inspection_end_ymdhms,
 			process_code,
-			defect_count
-		FROM inspection
+			def_pnt_x,
+			def_pnt_y,
+			def_pnt_g,
+			def_pnt_d,
+			def_size
+		FROM lake_mgr.eas_pnl_ins_def_a
 		WHERE inspection_end_ymdhms >= CAST(? AS TIMESTAMP)
 		  AND inspection_end_ymdhms <= CAST(? AS TIMESTAMP)
 	`
@@ -366,7 +380,7 @@ func (h *Handler) GetInspectionData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if defectName != "" {
-		query += ` AND defect_name = ?`
+		query += ` AND defect_name = ?` // Use derived defect_name
 		args = append(args, defectName)
 	}
 
@@ -401,9 +415,11 @@ func (h *Handler) GetInspectionData(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var r database.InspectionRow
 		if err := rows.Scan(
-			&r.GlassID, &r.PanelID, &r.ProductID, &r.PanelAddr,
-			&r.TermName, &r.DefectName, &r.InspectionEndYmdhms,
-			&r.ProcessCode, &r.DefectCount,
+			&r.ProductID, &r.PanelID, &r.ModelCode,
+			&r.DefectLatestSummaryDefectTermNameS, &r.DefectName,
+			&r.InspectionEndYmdhms,
+			&r.ProcessCode, &r.DefPntX, &r.DefPntY,
+			&r.DefPntG, &r.DefPntD, &r.DefSize,
 		); err != nil {
 			continue
 		}
@@ -411,7 +427,7 @@ func (h *Handler) GetInspectionData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get total count for pagination
-	countQuery := `SELECT COUNT(*) FROM inspection WHERE inspection_end_ymdhms >= CAST(? AS TIMESTAMP) AND inspection_end_ymdhms <= CAST(? AS TIMESTAMP)`
+	countQuery := `SELECT COUNT(*) FROM lake_mgr.eas_pnl_ins_def_a WHERE inspection_end_ymdhms >= CAST(? AS TIMESTAMP) AND inspection_end_ymdhms <= CAST(? AS TIMESTAMP)`
 	countArgs := []interface{}{startTime, endTime}
 	if processCode != "" {
 		countQuery += ` AND process_code = ?`
@@ -436,33 +452,35 @@ func (h *Handler) GetInspectionData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetHistoryData queries history data by glass_id (required) with optional filters
+// GetHistoryData queries history data by product_id (required) with optional filters
 func (h *Handler) GetHistoryData(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
-	glassID := r.URL.Query().Get("glass_id")
+	productID := r.URL.Query().Get("product_id") // Was glass_id
+	if productID == "" {
+		productID = r.URL.Query().Get("glass_id") // Legacy support
+	}
 	processCode := r.URL.Query().Get("process_code")
 	equipmentID := r.URL.Query().Get("equipment_id")
 
 	// Validate required parameter
-	if glassID == "" {
-		respondError(w, http.StatusBadRequest, "glass_id is required")
+	if productID == "" {
+		respondError(w, http.StatusBadRequest, "product_id is required")
 		return
 	}
 
 	// Build query
 	query := `
 		SELECT 
-			glass_id,
 			product_id,
+			product_type_code,
 			lot_id,
 			equipment_line_id,
 			process_code,
-			timekey_ymdhms,
-			seq_num
-		FROM history
-		WHERE glass_id = ?
+			move_in_ymdhms
+		FROM lake_mgr.mas_pnl_prod_eqp_h
+		WHERE product_id = ?
 	`
-	args := []interface{}{glassID}
+	args := []interface{}{productID}
 
 	// Add optional filters
 	if processCode != "" {
@@ -475,7 +493,7 @@ func (h *Handler) GetHistoryData(w http.ResponseWriter, r *http.Request) {
 		args = append(args, equipmentID)
 	}
 
-	query += ` ORDER BY timekey_ymdhms ASC`
+	query += ` ORDER BY move_in_ymdhms ASC`
 
 	// Execute query
 	rows, err := h.db.Analytics.Query(query, args...)
@@ -490,8 +508,8 @@ func (h *Handler) GetHistoryData(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var r database.HistoryRow
 		if err := rows.Scan(
-			&r.GlassID, &r.ProductID, &r.LotID, &r.EquipmentLineID,
-			&r.ProcessCode, &r.TimekeyYmdhms, &r.SeqNum,
+			&r.ProductID, &r.ProductTypeCode, &r.LotID, &r.EquipmentLineID, // Using ProductType code as per struct
+			&r.ProcessCode, &r.MoveInYmdhms,
 		); err != nil {
 			continue
 		}
@@ -499,9 +517,9 @@ func (h *Handler) GetHistoryData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"glass_id": glassID,
-		"data":     results,
-		"count":    len(results),
+		"product_id": productID,
+		"data":       results,
+		"count":      len(results),
 	})
 }
 
@@ -512,92 +530,22 @@ func (h *Handler) GetEquipmentRankings(w http.ResponseWriter, r *http.Request) {
 	startDate := r.URL.Query().Get("start_date")
 	endDate := r.URL.Query().Get("end_date")
 
+	limit := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+	minGlassCount := 10 // Default
+
 	if startDate == "" || endDate == "" {
 		respondError(w, http.StatusBadRequest, "start_date and end_date are required")
 		return
 	}
 
-	// Query to get equipment rankings
-	query := `
-		SELECT 
-			h.equipment_line_id,
-			h.process_code,
-			COUNT(DISTINCT m.glass_id) as glass_count,
-			SUM(m.total_defects) as total_defects,
-			CAST(SUM(m.total_defects) AS FLOAT) / COUNT(DISTINCT m.glass_id) as equipment_defect_rate
-		FROM glass_stats m
-		JOIN history h ON m.glass_id = h.glass_id
-		WHERE m.work_date >= CAST(? AS DATE)
-		  AND m.work_date <= CAST(? AS DATE)
-	`
-
-	args := []interface{}{startDate, endDate}
-
-	if defectName != "" {
-		query += ` AND m.glass_id IN (
-			SELECT DISTINCT glass_id FROM inspection WHERE term_name = ?
-		)`
-		args = append(args, defectName)
-	}
-
-	query += ` GROUP BY h.equipment_line_id, h.process_code`
-
-	// Get overall defect rate
-	var overallRate float64
-	overallQuery := `
-		SELECT CAST(SUM(total_defects) AS FLOAT) / COUNT(*) 
-		FROM glass_stats 
-		WHERE work_date >= ? AND work_date <= ?
-	`
-	overallArgs := []interface{}{startDate, endDate}
-	if defectName != "" {
-		overallQuery += ` AND glass_id IN (SELECT DISTINCT glass_id FROM inspection WHERE term_name = ?)`
-		overallArgs = append(overallArgs, defectName)
-	}
-	h.db.Analytics.QueryRow(overallQuery, overallArgs...).Scan(&overallRate)
-
-	rows, err := h.db.Analytics.Query(query, args...)
+	// Call repository method
+	rankings, err := h.repo.GetEquipmentRankings(minGlassCount, defectName, startDate, endDate, limit)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, fmt.Sprintf("query failed: %v", err))
 		return
-	}
-	defer rows.Close()
-
-	type Ranking struct {
-		EquipmentID  string  `json:"equipment_id"`
-		ProcessCode  string  `json:"process_code"`
-		GlassCount   int     `json:"glass_count"`
-		TotalDefects int     `json:"total_defects"`
-		DefectRate   float64 `json:"defect_rate"`
-		OverallRate  float64 `json:"overall_rate"`
-		Delta        float64 `json:"delta"` // overall - equipment
-	}
-
-	rankings := []Ranking{}
-	for rows.Next() {
-		var r Ranking
-		r.OverallRate = overallRate
-		if err := rows.Scan(&r.EquipmentID, &r.ProcessCode, &r.GlassCount, &r.TotalDefects, &r.DefectRate); err != nil {
-			continue
-		}
-		r.Delta = overallRate - r.DefectRate
-		rankings = append(rankings, r)
-	}
-
-	// Sort by delta descending (biggest positive delta first)
-	// This can be done in Go or via ORDER BY in SQL
-	// For simplicity, we'll return as-is and let frontend sort
-
-	// Apply limit
-	limit := h.cfg.Analysis.TopNLimit
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil {
-			limit = parsed
-		}
-	}
-
-	if limit > 0 && len(rankings) > limit {
-		rankings = rankings[:limit]
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
