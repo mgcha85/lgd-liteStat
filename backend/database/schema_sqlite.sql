@@ -21,3 +21,15 @@ CREATE TABLE IF NOT EXISTS analysis_jobs (
     created_at DATETIME,
     updated_at DATETIME
 );
+
+CREATE TABLE IF NOT EXISTS analysis_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    defect_name TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    target_count INTEGER,
+    glass_count INTEGER,
+    duration_ms INTEGER,
+    status TEXT
+);

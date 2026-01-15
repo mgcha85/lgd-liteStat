@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"lgd-litestat/analysis"
+	"lgd-litestat/database"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // StreamResult represents a single line in NDJSON stream
@@ -35,6 +37,8 @@ func (h *Handler) AnalyzeStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // Important for Nginx
+
+	start := time.Now()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -104,14 +108,33 @@ func (h *Handler) AnalyzeStream(w http.ResponseWriter, r *http.Request) {
 
 	// 6. Stream Results to Client
 	encoder := json.NewEncoder(w)
+	totalGlassCount := 0
+
 	for res := range results {
+		if res.Result != nil {
+			if ar, ok := res.Result.(*database.AnalysisResults); ok {
+				var m analysis.AnalysisMetrics
+				if err := json.Unmarshal(ar.Metrics, &m); err == nil {
+					totalGlassCount += m.TargetGlassCount + m.OthersGlassCount
+				}
+			}
+		}
+
 		if err := encoder.Encode(res); err != nil {
 			fmt.Printf("Stream encode error: %v\n", err)
 			return // Client likely disconnected
 		}
 		flusher.Flush()
-
-		// Optional: Small delay if needed for UI smoothness / rate limit, but streaming is normally instant
-		// time.Sleep(10 * time.Millisecond)
 	}
+
+	// Log Analysis
+	h.repo.LogAnalysis(database.AnalysisLog{
+		DefectName:  req.DefectName,
+		StartDate:   req.StartDate,
+		EndDate:     req.EndDate,
+		TargetCount: len(req.Targets),
+		GlassCount:  totalGlassCount,
+		DurationMs:  time.Since(start).Milliseconds(),
+		Status:      "success",
+	})
 }

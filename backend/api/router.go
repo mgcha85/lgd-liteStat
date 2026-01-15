@@ -35,11 +35,16 @@ func SetupRouter(h *Handler) *mux.Router {
 	analyzeRouter.HandleFunc("", h.RequestAnalysis).Methods("POST") // Matches /api/analyze
 	analyzeRouter.HandleFunc("/batch", h.AnalyzeBatch).Methods("POST")
 	analyzeRouter.HandleFunc("/stream", h.AnalyzeStream).Methods("POST")
+	analyzeRouter.HandleFunc("/range", h.AnalyzeDateRange).Methods("POST")
+	analyzeRouter.HandleFunc("/glass/{glassId}", h.AnalyzeGlass).Methods("GET")
 	analyzeRouter.HandleFunc("/{jobId}/status", h.GetAnalysisStatus).Methods("GET")
 	analyzeRouter.HandleFunc("/{jobId}/results", h.GetAnalysisResults).Methods("GET")
 
 	// Equipment rankings (for frontend dashboard)
 	r.HandleFunc("/api/equipment/rankings", h.GetEquipmentRankings).Methods("GET")
+
+	// System Performance
+	r.HandleFunc("/api/system/performance/requests", h.GetAnalysisLogs).Methods("GET")
 
 	return r
 }

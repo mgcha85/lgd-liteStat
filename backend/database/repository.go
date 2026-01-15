@@ -293,3 +293,54 @@ func (r *Repository) CleanupOldData(retentionDays int) (map[string]int64, error)
 
 	return deleted, nil
 }
+
+// AnalysisLog represents a row in the analysis_logs table
+type AnalysisLog struct {
+	ID          int64     `json:"id"`
+	RequestTime time.Time `json:"request_time"`
+	DefectName  string    `json:"defect_name"`
+	StartDate   string    `json:"start_date"`
+	EndDate     string    `json:"end_date"`
+	TargetCount int       `json:"target_count"`
+	GlassCount  int       `json:"glass_count"`
+	DurationMs  int64     `json:"duration_ms"`
+	Status      string    `json:"status"`
+}
+
+// LogAnalysis records an analysis request
+func (r *Repository) LogAnalysis(log AnalysisLog) error {
+	_, err := r.db.App.Exec(`
+		INSERT INTO analysis_logs (
+			defect_name, start_date, end_date, target_count, 
+			glass_count, duration_ms, status, request_time
+		) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+	`, log.DefectName, log.StartDate, log.EndDate, log.TargetCount, log.GlassCount, log.DurationMs, log.Status)
+	return err
+}
+
+// GetRecentAnalysisLogs retrieves the recent analysis logs
+func (r *Repository) GetRecentAnalysisLogs(limit int) ([]AnalysisLog, error) {
+	rows, err := r.db.App.Query(`
+		SELECT id, request_time, defect_name, start_date, end_date, target_count, glass_count, duration_ms, status
+		FROM analysis_logs
+		ORDER BY id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []AnalysisLog
+	for rows.Next() {
+		var l AnalysisLog
+		if err := rows.Scan(
+			&l.ID, &l.RequestTime, &l.DefectName, &l.StartDate, &l.EndDate,
+			&l.TargetCount, &l.GlassCount, &l.DurationMs, &l.Status,
+		); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}

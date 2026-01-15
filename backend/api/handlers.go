@@ -208,6 +208,26 @@ func (h *Handler) AnalyzeBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	duration := time.Since(start).Milliseconds()
 
+	// Calculate total glass count
+	totalGlassCount := 0
+	for _, res := range results {
+		var m analysis.AnalysisMetrics
+		if err := json.Unmarshal(res.Metrics, &m); err == nil {
+			totalGlassCount += m.TargetGlassCount + m.OthersGlassCount
+		}
+	}
+
+	// Log Analysis
+	h.repo.LogAnalysis(database.AnalysisLog{
+		DefectName:  req.DefectName,
+		StartDate:   req.StartDate,
+		EndDate:     req.EndDate,
+		TargetCount: len(req.Targets),
+		GlassCount:  totalGlassCount,
+		DurationMs:  duration,
+		Status:      "success",
+	})
+
 	// Return map directly
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"status":      "success",
@@ -576,7 +596,7 @@ func (h *Handler) GetEquipmentRankings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if len(rankings) > limit {
+	if limit > 0 && len(rankings) > limit {
 		rankings = rankings[:limit]
 	}
 
@@ -638,4 +658,131 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
+// GetAnalysisLogs returns recent analysis performance logs
+func (h *Handler) GetAnalysisLogs(w http.ResponseWriter, r *http.Request) {
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil {
+			limit = parsed
+		}
+	}
+
+	logs, err := h.repo.GetRecentAnalysisLogs(limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get logs: %v", err))
+		return
+	}
+
+	respondJSON(w, http.StatusOK, logs)
+}
+
+// AnalyzeDateRange handles analysis by date range (Global Aggregation)
+func (h *Handler) AnalyzeDateRange(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		StartDate  string `json:"start_date"`
+		EndDate    string `json:"end_date"`
+		DefectName string `json:"defect_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Calculate Global Metrics directly from DB
+	// Reuse GetEquipmentRankings logic but for global?
+	// Or use Analyzer?
+	// For now, let's return the Ranking list as the "Analysis Result" for the date range
+	// because it contains the breakdown by equipment.
+	// But we should adapt to "Analyze" format?
+	// The user likely wants to download data.
+	// Let's call rankings query and return it.
+
+	// Create a mock request to reuse existing function logic if possible
+	// Actually, GetEquipmentRankings logic is perfect for "Date Range Analysis".
+	// I'll wrap it or just guide user to it?
+	// User asked for specific API. I will create a specific handler that calls the logic.
+	// We'll return EquipmentRankings data structure.
+
+	// Construct request for internal usage
+	q := r.URL.Query()
+	q.Set("start_date", req.StartDate)
+	q.Set("end_date", req.EndDate)
+	if req.DefectName != "" {
+		q.Set("defect_name", req.DefectName)
+	}
+	r.URL.RawQuery = q.Encode()
+	h.GetEquipmentRankings(w, r)
+}
+
+// AnalyzeGlass handles single glass analysis
+func (h *Handler) AnalyzeGlass(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	glassID := vars["glassId"]
+
+	// 1. Get History
+	hQuery := `SELECT product_id, lot_id, equipment_line_id, process_code, timekey_ymdhms FROM history WHERE glass_id = ? ORDER BY timekey_ymdhms ASC`
+	hRows, err := h.db.Analytics.Query(hQuery, glassID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to query history")
+		return
+	}
+	defer hRows.Close()
+
+	type HistoryItem struct {
+		ProcessCode string    `json:"process_code"`
+		EquipmentID string    `json:"equipment_id"`
+		Time        time.Time `json:"time"`
+	}
+	history := []HistoryItem{}
+	var lotID string
+	for hRows.Next() {
+		var h HistoryItem
+		var pid, lid string
+		hRows.Scan(&pid, &lid, &h.EquipmentID, &h.ProcessCode, &h.Time)
+		history = append(history, h)
+		lotID = lid
+	}
+
+	// 2. Get Defect Stats
+	var totalDefects int
+	var workDate string
+	err = h.db.Analytics.QueryRow(`
+		SELECT total_defects, CAST(work_date AS VARCHAR) 
+		FROM glass_stats WHERE glass_id = ?`, glassID).Scan(&totalDefects, &workDate)
+	if err != nil && err != sql.ErrNoRows {
+		respondError(w, http.StatusInternalServerError, "failed to query stats")
+		return
+	}
+
+	// 3. Get Inspection Details
+	iQuery := `SELECT defect_name, defect_count, inspection_end_ymdhms FROM inspection WHERE glass_id = ?`
+	iRows, err := h.db.Analytics.Query(iQuery, glassID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to query inspection")
+		return
+	}
+	defer iRows.Close()
+
+	type DefectItem struct {
+		Name  string    `json:"name"`
+		Count int       `json:"count"`
+		Time  time.Time `json:"time"`
+	}
+	defects := []DefectItem{}
+	for iRows.Next() {
+		var d DefectItem
+		iRows.Scan(&d.Name, &d.Count, &d.Time)
+		defects = append(defects, d)
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"glass_id":      glassID,
+		"lot_id":        lotID,
+		"work_date":     workDate,
+		"total_defects": totalDefects,
+		"history":       history,
+		"defects":       defects,
+	})
 }

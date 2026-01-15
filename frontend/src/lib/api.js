@@ -158,3 +158,25 @@ export async function streamBatchAnalysis(req, onResult) {
         reader.releaseLock();
     }
 }
+
+export async function getAnalysisLogs(limit = 20) {
+    const response = await fetch(`${API_BASE}/system/performance/requests?limit=${limit}`);
+    if (!response.ok) throw new Error("Failed to fetch analysis logs");
+    return response.json();
+}
+
+export async function analyzeDateRange(req) {
+    const response = await fetch(`${API_BASE}/analyze/range`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+    });
+    if (!response.ok) throw new Error("Range analysis failed");
+    return response.json();
+}
+
+export async function analyzeGlass(glassId) {
+    const response = await fetch(`${API_BASE}/analyze/glass/${glassId}`);
+    if (!response.ok) throw new Error("Glass analysis failed");
+    return response.json();
+}

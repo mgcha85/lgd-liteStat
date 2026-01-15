@@ -22,9 +22,11 @@
         if (!results) return;
         disposeCharts(); // Cleanup old charts
 
-        // 1. Glass Scatter (Target vs Others)
+        // 1. Glass Scatter (Target vs Others) - Split into Top/Bottom
         if (glassDiv) {
             const chart = echarts.init(glassDiv);
+
+            // Prepare Data
             const targetData = results.glass_results
                 .filter((r) => r.group_type === "Target")
                 .map((r) => [r.work_date, r.total_defects]);
@@ -32,38 +34,54 @@
                 .filter((r) => r.group_type === "Others")
                 .map((r) => [r.work_date, r.total_defects]);
 
+            // Date Boundaries
+            const allDates = [
+                ...new Set(
+                    results.glass_results.map((r) => r.work_date.split("T")[0]),
+                ),
+            ].sort();
+            const markLineData = allDates.map((date) => ({ xAxis: date }));
+
             chart.setOption({
                 title: {
                     text: "Glass Defects",
                     left: "center",
-                    textStyle: { fontSize: 12 },
+                    textStyle: { fontSize: 10 },
                 },
-                grid: { top: 30, bottom: 20, left: 40, right: 10 },
+                grid: { top: "15%", bottom: "10%", left: 40, right: 10 },
                 xAxis: { type: "time", splitLine: { show: false } },
-                yAxis: { type: "value", splitLine: { show: true } },
+                yAxis: {
+                    type: "value",
+                    splitLine: { show: true },
+                    name: "Defects",
+                },
                 series: [
+                    {
+                        name: "Target",
+                        type: "scatter",
+                        data: targetData,
+                        symbolSize: 4,
+                        itemStyle: { color: "#e74c3c" },
+                        markLine: {
+                            symbol: ["none", "none"],
+                            label: { show: false },
+                            lineStyle: { color: "#ccc", type: "dashed" },
+                            data: markLineData,
+                        },
+                    },
                     {
                         name: "Others",
                         type: "scatter",
                         data: othersData,
                         symbolSize: 3,
                         itemStyle: { color: "#bdc3c7", opacity: 0.6 },
-                        large: true, // Optimize for large data
-                    },
-                    {
-                        name: "Target",
-                        type: "scatter",
-                        data: targetData,
-                        symbolSize: 5,
-                        itemStyle: { color: "#e74c3c" },
-                        large: true, // Optimize for large data
                     },
                 ],
             });
             charts.push(chart);
         }
 
-        // 2. Lot Scatter
+        // 2. Lot Scatter (Unchanged)
         if (lotDiv) {
             const chart = echarts.init(lotDiv);
             const targetData = (results.lot_results || [])
@@ -104,7 +122,7 @@
             charts.push(chart);
         }
 
-        // 3. Daily Trend
+        // 3. Daily Trend - Remove Symbols
         if (dailyDiv) {
             const chart = echarts.init(dailyDiv);
             const targetData = (results.daily_results || [])
@@ -128,14 +146,14 @@
                         name: "Others",
                         type: "line",
                         data: othersData,
-                        showSymbol: false,
+                        showSymbol: false, // Scatter removed
                         lineStyle: { color: "#95a5a6", width: 1 },
                     },
                     {
                         name: "Target",
                         type: "line",
                         data: targetData,
-                        showSymbol: true,
+                        showSymbol: false, // Scatter removed
                         lineStyle: { color: "#e74c3c", width: 2 },
                     },
                 ],
@@ -192,8 +210,18 @@
             title: { text: title, left: "center", textStyle: { fontSize: 12 } },
             tooltip: { position: "top" },
             grid: { top: 30, bottom: 20, left: 30, right: 10 },
-            xAxis: { type: "category", data: xLabels, show: false },
-            yAxis: { type: "category", data: yLabels, show: false },
+            xAxis: {
+                type: "category",
+                data: xLabels,
+                show: true,
+                axisLabel: { fontSize: 8 },
+            },
+            yAxis: {
+                type: "category",
+                data: yLabels,
+                show: true,
+                axisLabel: { fontSize: 8 },
+            },
             visualMap: {
                 min: 0,
                 max: maxValue, // Use synced global max
@@ -270,32 +298,34 @@
                 </div>
             {/if}
 
-            <div class="grid grid-cols-5 gap-2 h-64">
-                <!-- 1. Glass Scatter -->
-                <div
-                    bind:this={glassDiv}
-                    class="w-full h-full border rounded"
-                ></div>
+            <div class="grid grid-cols-4 gap-2 h-64">
+                <!-- Col 1: Stacked Glass & Lot -->
+                <div class="flex flex-col gap-1 h-full">
+                    <!-- Glass Scatter -->
+                    <div
+                        bind:this={glassDiv}
+                        class="flex-1 w-full border rounded"
+                    ></div>
+                    <!-- Lot Scatter -->
+                    <div
+                        bind:this={lotDiv}
+                        class="h-24 w-full border rounded"
+                    ></div>
+                </div>
 
-                <!-- 2. Lot Scatter -->
-                <div
-                    bind:this={lotDiv}
-                    class="w-full h-full border rounded"
-                ></div>
-
-                <!-- 3. Daily Trend -->
+                <!-- Col 2: Daily Trend -->
                 <div
                     bind:this={dailyDiv}
                     class="w-full h-full border rounded"
                 ></div>
 
-                <!-- 4. Heatmap Target -->
+                <!-- Col 3: Heatmap Target -->
                 <div
                     bind:this={heatTargetDiv}
                     class="w-full h-full border rounded"
                 ></div>
 
-                <!-- 5. Heatmap Others -->
+                <!-- Col 4: Heatmap Others -->
                 <div
                     bind:this={heatOthersDiv}
                     class="w-full h-full border rounded"

@@ -9,6 +9,7 @@
         refreshMart,
         analyzeBatch,
         streamBatchAnalysis,
+        getAnalysisLogs,
         getConfig,
     } from "./api.js";
     import AnalysisCard from "./AnalysisCard.svelte";
@@ -24,6 +25,78 @@
     let selectedEquipment = null;
     let analysisResults = null;
     let jobStatus = null;
+
+    // Pagination
+    let currentPage = 1;
+    let pageSize = 20;
+
+    $: paginatedRankings = filteredRankings.slice(
+        (currentPage - 1) * pageSize,
+        currentPage * pageSize,
+    );
+    $: totalPages = Math.ceil(filteredRankings.length / pageSize);
+
+    // Reset pagination when filter results change
+    let previousFilteredLength = 0;
+    $: if (filteredRankings.length !== previousFilteredLength) {
+        currentPage = 1;
+        previousFilteredLength = filteredRankings.length;
+    }
+
+    function changePage(newPage) {
+        if (newPage >= 1 && newPage <= totalPages) {
+            currentPage = newPage;
+        }
+    }
+
+    function downloadExcel() {
+        if (!filteredRankings || filteredRankings.length === 0) return;
+
+        // Create CSV Header
+        const headers = [
+            "Rank",
+            "Equipment ID",
+            "Process",
+            "Defect Rate",
+            "Delta",
+            "Total Defects",
+            "Glass Count",
+        ];
+
+        // Map Data
+        const rows = filteredRankings.map((r, index) => [
+            index + 1,
+            r.equipment_id,
+            r.process_code,
+            (r.defect_rate * 100).toFixed(4) + "%", // as percentage? or raw? usually raw is better for excel but user sees formatted. I'll provide formatted.
+            (r.delta * 100).toFixed(4) + "%",
+            r.total_defects,
+            r.glass_count,
+        ]);
+
+        const csvContent = [
+            headers.join(","),
+            ...rows.map((row) => row.join(",")),
+        ].join("\n");
+
+        const blob = new Blob([csvContent], {
+            type: "text/csv;charset=utf-8;",
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute(
+            "download",
+            `analysis_rankings_${startDate}_${endDate}.csv`,
+        );
+        link.style.visibility = "hidden";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    let activeTab = "dashboard";
+    let performanceLogs = [];
 
     // Filters
     // Default to 2025-06-01 to match current mock data range (June 2025 - Jan 2026)
@@ -143,11 +216,12 @@
             const topN = config.analysis?.top_n_limit || 20;
 
             // Fetch more than limit to allow client filtering
+            // Fetch ALL data (limit=0) for client-side pagination
             const data = await getEquipmentRankings({
                 start_date: startDate,
                 end_date: endDate,
                 defect_name: defectName,
-                limit: topN, // Fetch more for client filtering
+                limit: 0,
             });
             rankings = data.rankings || [];
             // filterRankings call removed (Handled by reactive statement)
@@ -159,6 +233,17 @@
         } catch (e) {
             console.error("Load Rankings Error:", e);
             error = e.message;
+        } finally {
+            loading = false;
+        }
+    }
+
+    async function loadPerformanceLogs() {
+        loading = true;
+        try {
+            performanceLogs = await getAnalysisLogs(20);
+        } catch (e) {
+            console.error("Failed to load logs:", e);
         } finally {
             loading = false;
         }
@@ -222,19 +307,19 @@
         }
     }
 
-    // Auto-trigger when rankings are loaded
+    // Auto-trigger when paginated rankings are ready
     $: if (
-        filteredRankings &&
-        filteredRankings.length > 0 &&
+        paginatedRankings &&
+        paginatedRankings.length > 0 &&
         !batchAttempted &&
         !batchLoading &&
         !loading
     ) {
         console.log(
-            "Reactive Trigger: Starting Sequential Analysis... Len:",
-            filteredRankings.length,
+            "Reactive Trigger: Starting Streaming Analysis... Page Len:",
+            paginatedRankings.length,
         );
-        runSequentialAnalysis(filteredRankings.slice(0, 20));
+        runStreamingAnalysis(paginatedRankings);
     }
 
     async function analyzeEquipment(equipment) {
@@ -407,256 +492,403 @@
 </script>
 
 <div class="p-6">
-    <!-- Controls -->
-    <div class="card bg-base-100 shadow-xl mb-6">
-        <div class="card-body">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <label class="form-control w-full">
-                    <div class="label">
-                        <span class="label-text font-bold">Start Date</span>
-                    </div>
-                    <input
-                        type="date"
-                        bind:value={startDate}
-                        class="input input-bordered w-full"
-                    />
-                </label>
-                <label class="form-control w-full">
-                    <div class="label">
-                        <span class="label-text font-bold">End Date</span>
-                    </div>
-                    <input
-                        type="date"
-                        bind:value={endDate}
-                        class="input input-bordered w-full"
-                    />
-                </label>
-                <label class="form-control w-full">
-                    <div class="label">
-                        <span class="label-text font-bold">Defect Name</span>
-                    </div>
-                    <select
-                        bind:value={defectName}
-                        class="select select-bordered w-full"
-                    >
-                        {#each defectTerms as term}
-                            <option value={term}>{term}</option>
-                        {/each}
-                    </select>
-                </label>
-                <div class="flex items-end gap-2">
-                    <button
-                        class="btn btn-primary flex-1"
-                        on:click={loadRankings}
-                        disabled={loading}
-                    >
-                        {#if loading && !selectedEquipment}<span
-                                class="loading loading-spinner"
-                            ></span>{/if}
-                        Load
-                    </button>
-                    <button
-                        class="btn btn-secondary flex-1"
-                        on:click={handleIngest}
-                        disabled={loading}
-                    >
-                        {#if loading && !selectedEquipment}<span
-                                class="loading loading-spinner"
-                            ></span>{/if}
-                        Ingest
-                    </button>
-                </div>
-            </div>
-
-            <!-- Advanced Filters (Client Side) -->
-            <div class="collapse collapse-arrow bg-base-200 mt-4 rounded-box">
-                <input type="checkbox" />
-                <div class="collapse-title text-md font-medium">
-                    Advanced Filters
-                </div>
-                <div
-                    class="collapse-content grid grid-cols-1 md:grid-cols-2 gap-4"
-                >
-                    <label class="form-control">
-                        <div class="label">
-                            <span class="label-text"
-                                >Process Code (e.g. >1000, 100-200)</span
-                            >
-                        </div>
-                        <input
-                            type="text"
-                            bind:value={processCodeFilter}
-                            class="input input-bordered input-sm"
-                            placeholder="Filter..."
-                        />
-                    </label>
-                    <label class="form-control">
-                        <div class="label">
-                            <span class="label-text">Equipment ID</span>
-                        </div>
-                        <input
-                            type="text"
-                            bind:value={equipmentFilter}
-                            class="input input-bordered input-sm"
-                            placeholder="Filter..."
-                        />
-                    </label>
-                </div>
-            </div>
-        </div>
+    <!-- Tabs -->
+    <div role="tablist" class="tabs tabs-boxed mb-4">
+        <a
+            role="tab"
+            href="#"
+            tabindex="0"
+            class="tab {activeTab === 'dashboard' ? 'tab-active' : ''}"
+            on:click|preventDefault={() => (activeTab = "dashboard")}
+        >
+            Dashboard
+        </a>
+        <a
+            role="tab"
+            href="#"
+            tabindex="0"
+            class="tab {activeTab === 'performance' ? 'tab-active' : ''}"
+            on:click|preventDefault={() => {
+                activeTab = "performance";
+                loadPerformanceLogs();
+            }}
+        >
+            System Performance
+        </a>
     </div>
 
-    {#if error}
-        <div role="alert" class="alert alert-error mb-4">
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="stroke-current shrink-0 h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
-                /></svg
-            >
-            <span>{error}</span>
-        </div>
-    {/if}
-
-    <!-- Rankings Table -->
-    <div class="card bg-base-100 shadow-xl mb-6 overflow-hidden">
-        <div class="card-body p-0">
-            <div class="overflow-x-auto max-h-96">
-                <table class="table table-zebra table-pin-rows">
-                    <thead>
-                        <tr>
-                            <th>Equipment</th>
-                            <th>Process</th>
-                            <th>Glass Count</th>
-                            <th>Defect Rate</th>
-                            <th>Overall</th>
-                            <th>Delta</th>
-                            <!-- <th>Action</th> -->
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {#each filteredRankings as rank}
-                            <tr
-                                class:bg-base-200={selectedEquipment?.equipment_id ===
-                                    rank.equipment_id}
-                            >
-                                <td class="font-bold">{rank.equipment_id}</td>
-                                <td>{rank.process_code}</td>
-                                <td>{rank.glass_count.toLocaleString()}</td>
-                                <td>{rank.defect_rate.toFixed(3)}</td>
-                                <td>{rank.overall_rate.toFixed(3)}</td>
-                                <td
-                                    class={rank.delta > 0
-                                        ? "text-success font-bold"
-                                        : "text-error font-bold"}
-                                >
-                                    {rank.delta > 0
-                                        ? "+"
-                                        : ""}{rank.delta.toFixed(3)}
-                                </td>
-                                <!-- No Action cell -->
+    <!-- PERFORMANCE TAB -->
+    {#if activeTab === "performance"}
+        <div class="card bg-base-100 shadow-xl">
+            <div class="card-body">
+                <h2 class="card-title">Recent Analysis Requests (Last 20)</h2>
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Time</th>
+                                <th>Defect</th>
+                                <th>Date Range</th>
+                                <th>Targets</th>
+                                <th>Glass Count</th>
+                                <th>Duration (ms)</th>
+                                <th>Status</th>
                             </tr>
-                        {:else}
-                            <tr
-                                ><td
-                                    colspan="6"
-                                    class="text-center py-4 text-gray-500"
-                                    >No data available</td
-                                ></tr
+                        </thead>
+                        <tbody>
+                            {#each performanceLogs as log}
+                                <tr>
+                                    <td>{log.id}</td>
+                                    <td
+                                        >{new Date(
+                                            log.request_time,
+                                        ).toLocaleString()}</td
+                                    >
+                                    <td>{log.defect_name}</td>
+                                    <td>{log.start_date} ~ {log.end_date}</td>
+                                    <td>{log.target_count}</td>
+                                    <td>{log.glass_count.toLocaleString()}</td>
+                                    <td class="font-mono">{log.duration_ms}</td>
+                                    <td>
+                                        <span
+                                            class="badge {log.status ===
+                                            'success'
+                                                ? 'badge-success'
+                                                : 'badge-error'}"
+                                        >
+                                            {log.status}
+                                        </span>
+                                    </td>
+                                </tr>
+                            {:else}
+                                <tr
+                                    ><td colspan="8" class="text-center"
+                                        >No logs found</td
+                                    ></tr
+                                >
+                            {/each}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    {/if}
+
+    <!-- DASHBOARD TAB -->
+    <div class={activeTab === "dashboard" ? "" : "hidden"}>
+        <!-- Controls -->
+        <div class="card bg-base-100 shadow-xl mb-6">
+            <div class="card-body">
+                <div
+                    class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
+                >
+                    <label class="form-control w-full">
+                        <div class="label">
+                            <span class="label-text font-bold">Start Date</span>
+                        </div>
+                        <input
+                            type="date"
+                            bind:value={startDate}
+                            class="input input-bordered w-full"
+                        />
+                    </label>
+                    <label class="form-control w-full">
+                        <div class="label">
+                            <span class="label-text font-bold">End Date</span>
+                        </div>
+                        <input
+                            type="date"
+                            bind:value={endDate}
+                            class="input input-bordered w-full"
+                        />
+                    </label>
+                    <label class="form-control w-full">
+                        <div class="label">
+                            <span class="label-text font-bold">Defect Name</span
                             >
-                        {/each}
-                    </tbody>
-                </table>
+                        </div>
+                        <select
+                            bind:value={defectName}
+                            class="select select-bordered w-full"
+                        >
+                            {#each defectTerms as term}
+                                <option value={term}>{term}</option>
+                            {/each}
+                        </select>
+                    </label>
+                    <div class="flex items-end gap-2">
+                        <button
+                            class="btn btn-primary flex-1"
+                            on:click={loadRankings}
+                            disabled={loading}
+                        >
+                            {#if loading && !selectedEquipment}<span
+                                    class="loading loading-spinner"
+                                ></span>{/if}
+                            Load
+                        </button>
+                        <button
+                            class="btn btn-secondary flex-1"
+                            on:click={handleIngest}
+                            disabled={loading}
+                        >
+                            {#if loading && !selectedEquipment}<span
+                                    class="loading loading-spinner"
+                                ></span>{/if}
+                            Ingest
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Advanced Filters (Client Side) -->
+                <div
+                    class="collapse collapse-arrow bg-base-200 mt-4 rounded-box"
+                >
+                    <input type="checkbox" />
+                    <div class="collapse-title text-md font-medium">
+                        Advanced Filters
+                    </div>
+                    <div
+                        class="collapse-content grid grid-cols-1 md:grid-cols-2 gap-4"
+                    >
+                        <label class="form-control">
+                            <div class="label">
+                                <span class="label-text"
+                                    >Process Code (e.g. >1000, 100-200)</span
+                                >
+                            </div>
+                            <input
+                                type="text"
+                                bind:value={processCodeFilter}
+                                class="input input-bordered input-sm"
+                                placeholder="Filter..."
+                            />
+                        </label>
+                        <label class="form-control">
+                            <div class="label">
+                                <span class="label-text">Equipment ID</span>
+                            </div>
+                            <input
+                                type="text"
+                                bind:value={equipmentFilter}
+                                class="input input-bordered input-sm"
+                                placeholder="Filter..."
+                            />
+                        </label>
+                    </div>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Batch Analysis Cards -->
-    <div class="divider">Detailed Analysis (Top 20)</div>
-
-    <!-- DEBUG UI -->
-    <div class="alert alert-info text-xs mb-4 flex flex-col gap-2">
-        <h3 class="font-bold underline">DEBUG CONSOLE</h3>
-        <div class="grid grid-cols-2 gap-2">
-            <div>Rankings (Orig): {rankings.length}</div>
-            <div>
-                Filtered (Active): {filteredRankings
-                    ? filteredRankings.length
-                    : 0}
+        {#if error}
+            <div role="alert" class="alert alert-error mb-4">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="stroke-current shrink-0 h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    /></svg
+                >
+                <span>{error}</span>
             </div>
-            <div>Batch Attempted: {batchAttempted}</div>
-            <div>Batch Loading: {batchLoading}</div>
-            <div class="text-error font-bold">
-                Batch Error: {batchError || "None"}
+        {/if}
+
+        <!-- Rankings Table -->
+        <div class="card bg-base-100 shadow-xl mb-6 overflow-hidden">
+            <div class="card-body p-0">
+                <div class="overflow-x-auto max-h-96">
+                    <table class="table table-zebra table-pin-rows">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Equipment</th>
+                                <th>Process</th>
+                                <th>Glass Count</th>
+                                <th>Defect Rate</th>
+                                <th>Overall</th>
+                                <th>Delta</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {#each paginatedRankings as rank, i}
+                                <tr
+                                    class:bg-base-200={selectedEquipment?.equipment_id ===
+                                        rank.equipment_id}
+                                >
+                                    <th
+                                        >{(currentPage - 1) * pageSize +
+                                            i +
+                                            1}</th
+                                    >
+                                    <td class="font-bold"
+                                        >{rank.equipment_id}</td
+                                    >
+                                    <td>{rank.process_code}</td>
+                                    <td>{rank.glass_count.toLocaleString()}</td>
+                                    <td>{rank.defect_rate.toFixed(3)}</td>
+                                    <td>{rank.overall_rate.toFixed(3)}</td>
+                                    <td
+                                        class={rank.delta > 0
+                                            ? "text-success font-bold"
+                                            : "text-error font-bold"}
+                                    >
+                                        {rank.delta > 0
+                                            ? "+"
+                                            : ""}{rank.delta.toFixed(3)}
+                                    </td>
+                                </tr>
+                            {:else}
+                                <tr
+                                    ><td
+                                        colspan="7"
+                                        class="text-center py-4 text-gray-500"
+                                        >No data available</td
+                                    ></tr
+                                >
+                            {/each}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination & Download Controls -->
+                <div
+                    class="p-4 flex flex-col sm:flex-row justify-between items-center gap-4 bg-base-100 border-t"
+                >
+                    <!-- Download Button (Left) -->
+                    <button
+                        class="btn btn-sm btn-outline gap-2"
+                        on:click={downloadExcel}
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                            />
+                        </svg>
+                        Download Excel
+                    </button>
+
+                    <!-- Pagination (Right/Center) -->
+                    <div class="join">
+                        <button
+                            class="join-item btn btn-sm"
+                            disabled={currentPage === 1}
+                            on:click={() => changePage(currentPage - 1)}
+                            >«</button
+                        >
+                        <button class="join-item btn btn-sm"
+                            >Page {currentPage} of {totalPages}</button
+                        >
+                        <button
+                            class="join-item btn btn-sm"
+                            disabled={currentPage === totalPages}
+                            on:click={() => changePage(currentPage + 1)}
+                            >»</button
+                        >
+                    </div>
+                </div>
             </div>
-            <div>Current Defect: {defectName}</div>
         </div>
 
-        <div class="bg-base-100 p-2 rounded border border-blue-300">
-            <strong>Result Keys ({Object.keys(batchResults).length}):</strong>
-            <br />
-            <span class="break-all font-mono text-[10px]"
-                >{Object.keys(batchResults).join(", ")}</span
-            >
-        </div>
+        <!-- Batch Analysis Cards -->
+        <div class="divider">Detailed Analysis (Top 20)</div>
 
-        <div class="bg-base-100 p-2 rounded border border-blue-300">
-            <strong>First Target ID:</strong>
-            {rankings[0]?.equipment_id}
-        </div>
+        <!-- DEBUG UI -->
+        <div class="alert alert-info text-xs mb-4 flex flex-col gap-2">
+            <h3 class="font-bold underline">DEBUG CONSOLE</h3>
+            <div class="grid grid-cols-2 gap-2">
+                <div>Rankings (Orig): {rankings.length}</div>
+                <div>
+                    Filtered (Active): {filteredRankings
+                        ? filteredRankings.length
+                        : 0}
+                </div>
+                <div>Batch Attempted: {batchAttempted}</div>
+                <div>Batch Loading: {batchLoading}</div>
+                <div class="text-error font-bold">
+                    Batch Error: {batchError || "None"}
+                </div>
+                <div>Current Defect: {defectName}</div>
+            </div>
 
-        <div class="flex gap-2 mt-2">
-            <button
-                class="btn btn-xs btn-primary"
-                on:click={() => runStreamingAnalysis(rankings.slice(0, 20))}
-                >Retry Analysis</button
-            >
-            <button class="btn btn-xs btn-secondary" on:click={loadRankings}
-                >Reload Rankings</button
-            >
-        </div>
-    </div>
-
-    {#if batchLoading}
-        <center><span class="loading loading-spinner loading-lg"></span></center
-        >
-    {/if}
-
-    {#if filteredRankings.length === 0}
-        <div class="alert alert-warning">
-            Debug: Filtered Rankings is 0. (Raw: {rankings.length})
-        </div>
-    {/if}
-
-    <!-- Removed Keyed Each to prevent key errors -->
-    {#each filteredRankings.slice(0, 20) as equipment, i}
-        <div
-            class="border-l-4 pl-2 mb-4 {batchResults &&
-            batchResults[equipment.equipment_id]
-                ? 'border-success'
-                : 'border-warning'}"
-        >
-            <div class="text-xs text-gray-400 mb-1 flex gap-2">
-                <span>ID: {equipment.equipment_id}</span>
-                <span
-                    >Has Res: {batchResults &&
-                    batchResults[equipment.equipment_id]
-                        ? "YES"
-                        : "NO"}</span
+            <div class="bg-base-100 p-2 rounded border border-blue-300">
+                <strong
+                    >Result Keys ({Object.keys(batchResults).length}):</strong
+                >
+                <br />
+                <span class="break-all font-mono text-[10px]"
+                    >{Object.keys(batchResults).join(", ")}</span
                 >
             </div>
-            <AnalysisCard
-                {equipment}
-                results={batchResults
-                    ? batchResults[equipment.equipment_id]
-                    : null}
-            />
+
+            <div class="bg-base-100 p-2 rounded border border-blue-300">
+                <strong>First Target ID:</strong>
+                {rankings[0]?.equipment_id}
+            </div>
+
+            <div class="flex gap-2 mt-2">
+                <button
+                    class="btn btn-xs btn-primary"
+                    on:click={() => runStreamingAnalysis(rankings.slice(0, 20))}
+                    >Retry Analysis</button
+                >
+                <button class="btn btn-xs btn-secondary" on:click={loadRankings}
+                    >Reload Rankings</button
+                >
+            </div>
         </div>
-    {/each}
+
+        {#if batchLoading}
+            <center
+                ><span class="loading loading-spinner loading-lg"
+                ></span></center
+            >
+        {/if}
+
+        {#if filteredRankings.length === 0}
+            <div class="alert alert-warning">
+                Debug: Filtered Rankings is 0. (Raw: {rankings.length})
+            </div>
+        {/if}
+
+        <!-- Removed Keyed Each to prevent key errors -->
+        {#each filteredRankings.slice(0, 20) as equipment, i}
+            <div
+                class="border-l-4 pl-2 mb-4 {batchResults &&
+                batchResults[equipment.equipment_id]
+                    ? 'border-success'
+                    : 'border-warning'}"
+            >
+                <div class="text-xs text-gray-400 mb-1 flex gap-2">
+                    <span>ID: {equipment.equipment_id}</span>
+                    <span
+                        >Has Res: {batchResults &&
+                        batchResults[equipment.equipment_id]
+                            ? "YES"
+                            : "NO"}</span
+                    >
+                </div>
+                <AnalysisCard
+                    {equipment}
+                    results={batchResults
+                        ? batchResults[equipment.equipment_id]
+                        : null}
+                />
+            </div>
+        {/each}
+    </div>
 </div>

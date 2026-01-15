@@ -712,6 +712,14 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 		}
 	}
 
+	// 3.5 Fetch Heatmaps (Pre-calculation)
+	globalHeatmap, targetHeatmaps, err := a.fetchHeatmaps(req.Targets, req.StartDate, req.EndDate)
+	if err != nil {
+		fmt.Printf("Warning: fetchHeatmaps failed: %v\n", err)
+		globalHeatmap = make(map[string]int)
+		targetHeatmaps = make(map[string]map[string]int)
+	}
+
 	// 4. Compute Results Parallelly (or sequential loop)
 	results := make(map[string]*database.AnalysisResults)
 	var mu sync.Mutex
@@ -729,11 +737,6 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 			var glassRes []GlassResult
 			var lotResMap = make(map[string]*LotResult)
 			var dailyResMap = make(map[string]*DailyResult)
-			var heatTarget CellsAggregator
-			var heatOthers CellsAggregator
-
-			heatTarget.Init()
-			heatOthers.Init()
 
 			// Metrics counters
 			var targetDefects, othersDefects, targetCount, othersCount int
@@ -819,12 +822,7 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 				dr.GlassCount++
 				dr.TotalDefects += g.TotalDefects
 
-				// Heatmap Aggregation (FULL DATA)
-				if isTarget {
-					heatTarget.Add(g.PanelMap)
-				} else {
-					heatOthers.Add(g.PanelMap)
-				}
+				// Heatmap Aggregation (Moved to Pre-fetch)
 			}
 
 			// Finalize Lot Results
@@ -856,10 +854,21 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 				return finalDailyRes[i].WorkDate < finalDailyRes[j].WorkDate
 			})
 
-			// Finalize Heatmap (Keep All - fixed size cells)
+			// Heatmap Calculation (Using Pre-fetched Maps)
+			targetMap := targetHeatmaps[t.EquipmentID]
+			othersMap := make(map[string]int)
+
+			for addr, count := range globalHeatmap {
+				tCount := targetMap[addr]
+				othersCount := count - tCount
+				if othersCount > 0 {
+					othersMap[addr] = othersCount
+				}
+			}
+
 			finalHeatmap := []HeatmapCell{}
-			finalHeatmap = append(finalHeatmap, heatTarget.ToCells("Target")...)
-			finalHeatmap = append(finalHeatmap, heatOthers.ToCells("Others")...)
+			finalHeatmap = append(finalHeatmap, generateHeatmapCells(targetMap, targetDefects, targetCount, "Target")...)
+			finalHeatmap = append(finalHeatmap, generateHeatmapCells(othersMap, othersDefects, othersCount, "Others")...)
 
 			// Calculate Metrics (Manually using counters)
 			totalDefects := targetDefects + othersDefects
@@ -1050,4 +1059,128 @@ func buildProcessFilter(codes []string) (string, []interface{}) {
 		args[i] = code
 	}
 	return fmt.Sprintf("process_code IN (%s)", strings.Join(placeholders, ",")), args
+}
+
+// fetchHeatmaps retrieves heatmap data from inspection table
+// Returns:
+// 1. globalHeatmap: map[panel_addr]count
+// 2. targetHeatmaps: map[equipment_id]map[panel_addr]count
+func (a *Analyzer) fetchHeatmaps(targets []AnalysisTarget, start, end string) (map[string]int, map[string]map[string]int, error) {
+	// 1. Global Heatmap
+	global := make(map[string]int)
+	gQuery := `
+		SELECT panel_addr, COUNT(*) 
+		FROM inspection 
+		WHERE inspection_end_ymdhms >= ? AND inspection_end_ymdhms <= ?
+		GROUP BY panel_addr
+	`
+	// DuckDB timestamp comparison might need cast if input is string YYYY-MM-DD
+	// Assuming start/end are "2025-06-01" -> Cast to TIMESTAMP or compare with dates?
+	// The schema says inspection_end_ymdhms is TIMESTAMP.
+	// We should append time to start/end or rely on casting.
+	// Lets append time.
+	startTime := start + " 00:00:00"
+	endTime := end + " 23:59:59"
+
+	rows, err := a.db.Analytics.Query(gQuery, startTime, endTime)
+	if err != nil {
+		return nil, nil, fmt.Errorf("global heatmap query failed: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var addr string
+		var count int
+		if err := rows.Scan(&addr, &count); err == nil {
+			global[addr] = count
+		}
+	}
+
+	// 2. Target Heatmaps
+	// Optimization: If many targets, we can query by Equipment IDs.
+	// But inspection table doesn't have equipment_id. History does.
+	// Query: Join inspection and history using glass_id.
+	// SELECT h.equipment_line_id, i.panel_addr, COUNT(*)
+	// FROM inspection i
+	// JOIN history h ON i.glass_id = h.glass_id
+	// WHERE h.equipment_line_id IN (...) AND i.time ... GROUP BY ...
+
+	targetMap := make(map[string]map[string]int)
+	targetIds := []string{}
+	for _, t := range targets {
+		targetMap[t.EquipmentID] = make(map[string]int)
+		targetIds = append(targetIds, t.EquipmentID)
+	}
+
+	if len(targetIds) > 0 {
+		placeholders := make([]string, len(targetIds))
+		args := make([]interface{}, len(targetIds)+2)
+		args[0] = startTime
+		args[1] = endTime
+		for i, id := range targetIds {
+			placeholders[i] = "?"
+			args[i+2] = id
+		}
+
+		tQuery := fmt.Sprintf(`
+			SELECT h.equipment_line_id, i.panel_addr, COUNT(*)
+			FROM inspection i
+			JOIN history h ON i.glass_id = h.glass_id
+			WHERE i.inspection_end_ymdhms >= ? AND i.inspection_end_ymdhms <= ?
+			  AND h.equipment_line_id IN (%s)
+			GROUP BY h.equipment_line_id, i.panel_addr
+		`, strings.Join(placeholders, ","))
+
+		tRows, err := a.db.Analytics.Query(tQuery, args...)
+		if err != nil {
+			return nil, nil, fmt.Errorf("target heatmap query failed: %w", err)
+		}
+		defer tRows.Close()
+
+		for tRows.Next() {
+			var eq, addr string
+			var count int
+			if err := tRows.Scan(&eq, &addr, &count); err == nil {
+				if _, ok := targetMap[eq]; ok {
+					targetMap[eq][addr] = count
+				}
+			}
+		}
+	}
+
+	return global, targetMap, nil
+}
+
+func generateHeatmapCells(data map[string]int, totalDefects, totalGlasses int, groupType string) []HeatmapCell {
+	cells := []HeatmapCell{}
+	if totalGlasses == 0 {
+		return cells
+	}
+
+	// Assuming data is map[panel_addr]count
+	for addr, count := range data {
+		if len(addr) < 2 {
+			continue
+		}
+		// Logic: y = last char, x = rest
+		y := addr[len(addr)-1:]
+		x := addr[:len(addr)-1]
+
+		rate := 0.0
+		// Rate = Defects / Total Glasses ? Or Defects / Total Defects?
+		// Usually Defect Rate = Count / Total Glasses.
+		if totalGlasses > 0 {
+			rate = float64(count) / float64(totalGlasses)
+		}
+
+		cells = append(cells, HeatmapCell{
+			GroupType:    groupType,
+			X:            x,
+			Y:            y,
+			TotalDefects: count,
+			TotalGlasses: totalGlasses,
+			DefectRate:   rate,
+		})
+	}
+	return cells
 }
