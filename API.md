@@ -1,49 +1,57 @@
-# API Reference - LGD liteStat
+# API 레퍼런스 - LGD liteStat
 
-Complete API documentation with curl examples for the display manufacturing data analysis system.
+디스플레이 제조 데이터 분석 시스템을 위한 상세 API 문서입니다. 모든 엔드포인트에 대한 설명과 curl 예제가 포함되어 있습니다.
 
-## Base URL
+## 기본 URL (Base URL)
 
 ```
 http://localhost:8080
 ```
 
----
+## 공장 선택 (Facility Selection)
 
-## 📋 Table of Contents
+모든 데이터 조회 및 분석 API는 특정 공장 데이터베이스(`data/{facility}/duck.db`)를 대상으로 하기 위해 공장 선택을 지원합니다.
 
-1. [Health Check](#1-health-check)
-2. [Data Query APIs](#data-query-apis)
-   - [Query Inspection Data](#21-query-inspection-data)
-   - [Query History Data](#22-query-history-data)
-3. [Data Management APIs](#data-management-apis)
-   - [Ingest Data](#31-ingest-data)
-   - [Refresh Data Mart](#32-refresh-data-mart)
-   - [Cleanup Old Data](#33-cleanup-old-data)
-4. [Analysis APIs](#analysis-apis)
-   - [Request Analysis](#41-request-analysis)
-   - [Check Analysis Status](#42-check-analysis-status)
-   - [Get Analysis Results](#43-get-analysis-results)
-   - [Get Equipment Rankings](#44-get-equipment-rankings)
+- **헤더 (Header)**: `X-Facility-Code: A1T`
+- **쿼리 파라미터 (Query Parameter)**: `?facility_code=A1T`
+- **기본값 (Default)**: 생략 시 첫 번째로 구성된 공장(예: `A1T`)을 사용합니다.
 
 ---
 
-## 1. Health Check
+## 📋 목차
 
-Check API and database health status.
+1. [헬스 체크 (Health Check)](#1-헬스-체크)
+2. [데이터 조회 API](#데이터-조회-apis)
+   - [검사 데이터 조회](#21-검사-데이터-조회)
+   - [이력 데이터 조회](#22-이력-데이터-조회)
+3. [데이터 관리 API](#데이터-관리-apis)
+   - [데이터 수집 (Ingest)](#31-데이터-수집)
+   - [데이터 마트 갱신](#32-데이터-마트-갱신)
+   - [오래된 데이터 정리](#33-오래된-데이터-정리)
+4. [분석 API](#분석-apis)
+   - [분석 요청](#41-분석-요청)
+   - [분석 상태 확인](#42-분석-상태-확인)
+   - [분석 결과 조회](#43-분석-결과-조회)
+   - [장비 랭킹 조회](#44-장비-랭킹-조회)
 
-### Endpoint
+---
+
+## 1. 헬스 체크
+
+API 서버와 데이터베이스의 상태를 확인합니다.
+
+### 엔드포인트
 ```
 GET /health
 GET /api/health
 ```
 
-### Request
+### 요청 예시
 ```bash
 curl http://localhost:8080/health
 ```
 
-### Response (200 OK)
+### 응답 (200 OK)
 ```json
 {
   "status": "healthy",
@@ -59,170 +67,80 @@ curl http://localhost:8080/health
 
 ---
 
-## Data Query APIs
+## 데이터 조회 APIs
 
-### 2.1 Query Inspection Data
+### 2.1 검사 데이터 조회
 
-Query inspection data by time range with optional filters.
+시간 범위와 선택적 필터조건으로 검사(Inspection) 데이터를 조회합니다.
 
-#### Endpoint
+#### 엔드포인트
 ```
 GET /api/inspection
 ```
 
-#### Parameters
+#### 파라미터
 
-| Parameter | Type | Required | Description |
+| 파라미터 | 타입 | 필수 여부 | 설명 |
 |-----------|------|----------|-------------|
-| start_time | string | **Yes** | Start time (format: `YYYY-MM-DD HH:MM:SS`) |
-| end_time | string | **Yes** | End time (format: `YYYY-MM-DD HH:MM:SS`) |
-| process_code | string | No | Filter by process code (e.g., `P100`) |
-| defect_name | string | No | Filter by defect name (e.g., `SPOT-DARK`) |
-| limit | integer | No | Max records to return (default: 1000) |
-| offset | integer | No | Offset for pagination (default: 0) |
+| start_time | string | **필수** | 시작 시간 (형식: `YYYY-MM-DD HH:MM:SS`) |
+| end_time | string | **필수** | 종료 시간 (형식: `YYYY-MM-DD HH:MM:SS`) |
+| process_code | string | 선택 | 공정 코드로 필터링 (예: `P100`) |
+| defect_name | string | 선택 | 불량명으로 필터링 (예: `SPOT-DARK`) |
+| limit | integer | 선택 | 최대 반환 레코드 수 (기본값: 1000) |
+| offset | integer | 선택 | 페이지네이션 오프셋 (기본값: 0) |
 
-#### Request Examples
+#### 요청 예시
 
-**Basic query by time range:**
+**기본 시간 범위 조회:**
 ```bash
 curl "http://localhost:8080/api/inspection?start_time=2024-01-01%2000:00:00&end_time=2024-01-31%2023:59:59"
 ```
 
-**With process code filter:**
-```bash
-curl "http://localhost:8080/api/inspection?start_time=2024-01-01%2000:00:00&end_time=2024-01-31%2023:59:59&process_code=P100"
-```
-
-**With defect name filter:**
-```bash
-curl "http://localhost:8080/api/inspection?start_time=2024-01-01%2000:00:00&end_time=2024-01-31%2023:59:59&defect_name=SPOT-DARK"
-```
-
-**With pagination:**
-```bash
-curl "http://localhost:8080/api/inspection?start_time=2024-01-01%2000:00:00&end_time=2024-01-31%2023:59:59&limit=100&offset=0"
-```
-
-**All filters combined:**
-```bash
-curl "http://localhost:8080/api/inspection?start_time=2024-01-01%2000:00:00&end_time=2024-01-31%2023:59:59&process_code=P100&defect_name=SPOT-DARK&limit=100&offset=0"
-```
-
-#### Response (200 OK)
-```json
-{
-  "data": [
-    {
-      "glass_id": "G00000001",
-      "panel_id": "ABCDEFAB1",
-      "product_id": "ABCDEF",
-      "panel_addr": "AB1",
-      "term_name": "TYPE1-SPOT-SIZE-DARK",
-      "defect_name": "SPOT-DARK",
-      "inspection_end_ymdhms": "2024-01-15T14:30:25Z",
-      "process_code": "P100",
-      "defect_count": 2
-    }
-  ],
-  "pagination": {
-    "limit": 100,
-    "offset": 0,
-    "total_count": 15234,
-    "has_more": true
-  }
-}
-```
-
 ---
 
-### 2.2 Query History Data
+### 2.2 이력 데이터 조회
 
-Query glass progression history by glass_id with optional filters.
+Glass ID를 기준으로 공정 진행 이력을 조회합니다.
 
-#### Endpoint
+#### 엔드포인트
 ```
 GET /api/history
 ```
 
-#### Parameters
+#### 파라미터
 
-| Parameter | Type | Required | Description |
+| 파라미터 | 타입 | 필수 여부 | 설명 |
 |-----------|------|----------|-------------|
-| glass_id | string | **Yes** | Glass ID to query (e.g., `G00000001`) |
-| process_code | string | No | Filter by process code |
-| equipment_id | string | No | Filter by equipment ID |
+| glass_id | string | **필수** | 조회할 Glass ID (예: `G00000001`) |
+| process_code | string | 선택 | 공정 코드 필터 |
+| equipment_id | string | 선택 | 장비 ID 필터 |
 
-#### Request Examples
-
-**Query by glass_id:**
+#### 요청 예시
 ```bash
 curl "http://localhost:8080/api/history?glass_id=G00000001"
 ```
 
-**With process code filter:**
-```bash
-curl "http://localhost:8080/api/history?glass_id=G00000001&process_code=P100"
-```
-
-**With equipment filter:**
-```bash
-curl "http://localhost:8080/api/history?glass_id=G00000001&equipment_id=EQ001"
-```
-
-**All filters combined:**
-```bash
-curl "http://localhost:8080/api/history?glass_id=G00000001&process_code=P100&equipment_id=EQ001"
-```
-
-#### Response (200 OK)
-```json
-{
-  "glass_id": "G00000001",
-  "data": [
-    {
-      "glass_id": "G00000001",
-      "product_id": "ABCDEF",
-      "lot_id": "LOT000001",
-      "equipment_line_id": "EQ001",
-      "process_code": "P100",
-      "timekey_ymdhms": "2024-01-15T10:00:00Z",
-      "seq_num": 1
-    },
-    {
-      "glass_id": "G00000001",
-      "product_id": "ABCDEF",
-      "lot_id": "LOT000001",
-      "equipment_line_id": "EQ002",
-      "process_code": "P200",
-      "timekey_ymdhms": "2024-01-15T12:00:00Z",
-      "seq_num": 1
-    }
-  ],
-  "count": 2
-}
-```
-
 ---
 
-## Data Management APIs
+## 데이터 관리 APIs
 
-### 3.1 Ingest Data
+### 3.1 데이터 수집 (Ingest)
 
-Download and ingest data from source system (or generate mock data).
+소스 시스템으로부터 데이터를 다운로드하거나 Mock 데이터를 생성하여 수집합니다.
 
-#### Endpoint
+#### 엔드포인트
 ```
 POST /api/ingest
 ```
 
-#### Request Body
+#### 요청 바디
 
-| Field | Type | Required | Description |
+| 필드 | 타입 | 필수 여부 | 설명 |
 |-------|------|----------|-------------|
-| start_time | string | **Yes** | Start time (RFC3339 format) |
-| end_time | string | **Yes** | End time (RFC3339 format) |
+| start_time | string | **필수** | 시작 시간 (RFC3339 형식) |
+| end_time | string | **필수** | 종료 시간 (RFC3339 형식) |
 
-#### Request Example
+#### 요청 예시
 ```bash
 curl -X POST http://localhost:8080/api/ingest \
   -H "Content-Type: application/json" \
@@ -232,120 +150,57 @@ curl -X POST http://localhost:8080/api/ingest \
   }'
 ```
 
-#### Response (200 OK)
-```json
-{
-  "status": "success",
-  "records_inserted": {
-    "inspection": 25000,
-    "history": 12000
-  }
-}
-```
-
-#### Crontab Example (Hourly)
-```bash
-# Download last hour of data every hour
-0 * * * * curl -X POST http://localhost:8080/api/ingest -H "Content-Type: application/json" -d '{"start_time":"'$(date -u -d '1 hour ago' +\%Y-\%m-\%dT\%H:00:00Z)'","end_time":"'$(date -u +\%Y-\%m-\%dT\%H:00:00Z)'"}'
-```
-
 ---
 
-### 3.2 Refresh Data Mart
+### 3.2 데이터 마트 갱신
 
-Rebuild the glass_stats materialized view for optimized analysis queries.
+분석 쿼리 최적화를 위해 `glass_stats` Materialized View를 재생성합니다.
 
-#### Endpoint
+#### 엔드포인트
 ```
 POST /api/mart/refresh
 ```
 
-#### Request Example
+#### 요청 예시
 ```bash
 curl -X POST http://localhost:8080/api/mart/refresh
 ```
 
-#### Response (200 OK)
-```json
-{
-  "status": "success",
-  "duration_ms": 2347,
-  "rows_created": 166666,
-  "stats": {
-    "total_rows": 166666,
-    "min_date": "2024-01-01",
-    "max_date": "2025-02-05",
-    "avg_defects_per_glass": 1.5,
-    "total_defects": 1000000,
-    "unique_lots": 5555
-  }
-}
-```
-
-#### Crontab Example (Every hour, 5 minutes after ingestion)
-```bash
-5 * * * * curl -X POST http://localhost:8080/api/mart/refresh
-```
-
 ---
 
-### 3.3 Cleanup Old Data
+### 3.3 오래된 데이터 정리
 
-Delete data older than the configured retention period (default: 1 year).
+설정된 보존 기간(Retention Period)보다 오래된 데이터를 삭제합니다 (기본값: 1년).
 
-#### Endpoint
+#### 엔드포인트
 ```
 POST /api/cleanup
 ```
 
-#### Request Example
-```bash
-curl -X POST http://localhost:8080/api/cleanup
-```
-
-#### Response (200 OK)
-```json
-{
-  "status": "success",
-  "deleted_rows": {
-    "inspection": 50000,
-    "history": 25000,
-    "glass_stats": 8333,
-    "analysis_cache": 2,
-    "analysis_jobs": 5
-  }
-}
-```
-
-#### Crontab Example (Daily at 2 AM)
-```bash
-0 2 * * * curl -X POST http://localhost:8080/api/cleanup
-```
-
 ---
 
-## Analysis APIs
+## 분석 APIs
 
-### 4.1 Request Analysis
+### 4.1 분석 요청
 
-Submit an asynchronous analysis job for Target vs Others comparison.
+비동기 분석 작업을 요청합니다 (Target vs Others 비교).
 
-#### Endpoint
+#### 엔드포인트
 ```
 POST /api/analyze
 ```
 
-#### Request Body
+#### 요청 바디
 
-| Field | Type | Required | Description |
+| 필드 | 타입 | 필수 여부 | 설명 |
 |-------|------|----------|-------------|
-| defect_name | string | **Yes** | Defect name to analyze (e.g., `SPOT-DARK`) |
-| start_date | string | **Yes** | Start date (format: `YYYY-MM-DD`) |
-| end_date | string | **Yes** | End date (format: `YYYY-MM-DD`) |
-| process_codes | array[string] | No | Filter by process codes (e.g., `["P100","P200"]`) |
-| equipment_ids | array[string] | No | Equipment IDs for Target group (required for meaningful analysis) |
+| defect_name | string | **필수** | 분석할 불량명 (예: `SPOT-DARK`) |
+| start_date | string | **필수** | 시작 일자 (형식: `YYYY-MM-DD`) |
+| end_date | string | **필수** | 종료 일자 (형식: `YYYY-MM-DD`) |
+| process_codes | array[string] | 선택 | 공정 코드 배열 (예: `["P100","P200"]`) |
+| equipment_ids | array[string] | 선택 | Target 그룹으로 지정할 장비 ID 배열 |
 
-#### Request Example
+#### 요청 예시
 ```bash
 curl -X POST http://localhost:8080/api/analyze \
   -H "Content-Type: application/json" \
@@ -358,7 +213,7 @@ curl -X POST http://localhost:8080/api/analyze \
   }'
 ```
 
-#### Response (202 Accepted)
+#### 응답 (202 Accepted)
 ```json
 {
   "job_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -366,427 +221,58 @@ curl -X POST http://localhost:8080/api/analyze \
 }
 ```
 
-**Note:** Save the `job_id` to check status and retrieve results.
-
 ---
 
-### 4.2 Check Analysis Status
+### 4.2 분석 상태 확인
 
-Check the status of an analysis job.
+분석 작업의 진행 상태를 확인합니다.
 
-#### Endpoint
+#### 엔드포인트
 ```
 GET /api/analyze/{jobId}/status
 ```
 
-#### Request Example
-```bash
-JOB_ID="550e8400-e29b-41d4-a716-446655440000"
-curl "http://localhost:8080/api/analyze/${JOB_ID}/status"
-```
-
-#### Response - Pending (200 OK)
-```json
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "pending",
-  "progress": 0,
-  "created_at": "2024-01-15T05:30:00Z",
-  "updated_at": "2024-01-15T05:30:00Z"
-}
-```
-
-#### Response - Running (200 OK)
-```json
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "running",
-  "progress": 50,
-  "created_at": "2024-01-15T05:30:00Z",
-  "updated_at": "2024-01-15T05:30:05Z"
-}
-```
-
-#### Response - Completed (200 OK)
-```json
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "completed",
-  "cache_key": "a3f2b8c9d1e6...",
-  "progress": 100,
-  "created_at": "2024-01-15T05:30:00Z",
-  "updated_at": "2024-01-15T05:30:10Z"
-}
-```
-
-#### Response - Failed (200 OK)
-```json
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "failed",
-  "error_message": "Equipment filter returned no glasses",
-  "progress": 25,
-  "created_at": "2024-01-15T05:30:00Z",
-  "updated_at": "2024-01-15T05:30:03Z"
-}
-```
-
-#### Polling Pattern
-```bash
-# Wait for job completion
-while true; do
-  STATUS=$(curl -s "http://localhost:8080/api/analyze/${JOB_ID}/status" | jq -r '.status')
-  echo "Status: $STATUS"
-  [[ "$STATUS" == "completed" ]] && break
-  [[ "$STATUS" == "failed" ]] && exit 1
-  sleep 2
-done
-```
-
 ---
 
-### 4.3 Get Analysis Results
+### 4.3 분석 결과 조회
 
-Retrieve the results of a completed analysis job. Returns 4 result sets:
-1. **Glass-level** (scatter plot data)
-2. **Lot-level** (aggregated by lot)
-3. **Daily** (time series)
-4. **Heatmap** (panel position distribution)
+완료된 분석 작업의 결과를 조회합니다. (Glass별, Lot별, 일별, 히트맵 데이터 포함)
 
-Plus summary **metrics**.
-
-#### Endpoint
+#### 엔드포인트
 ```
 GET /api/analyze/{jobId}/results
 ```
 
-#### Query Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| limit | integer | 100 | Max glass results to return |
-| offset | integer | 0 | Offset for glass results pagination |
-
-#### Request Examples
-
-**Basic request:**
-```bash
-JOB_ID="550e8400-e29b-41d4-a716-446655440000"
-curl "http://localhost:8080/api/analyze/${JOB_ID}/results"
-```
-
 ---
 
+### 4.4 장비 랭킹 조회
 
+불량률 델타(전체 불량률 - 해당 장비 불량률)를 기준으로 상위 장비를 조회합니다. 델타가 높을수록(양수) 해당 장비의 성능이 평균보다 좋음을 의미합니다.
 
-**With pagination:**
-```bash
-curl "http://localhost:8080/api/analyze/${JOB_ID}/results?limit=100&offset=0"
-```
-
-**Pretty-printed with jq:**
-```bash
-curl -s "http://localhost:8080/api/analyze/${JOB_ID}/results?limit=10" | jq .
-```
-
-#### Response (200 OK)
-```json
-{
-  "glass_results": [
-    {
-      "glass_id": "G00000001",
-      "lot_id": "LOT000001",
-      "work_date": "2024-01-15",
-      "total_defects": 3,
-      "group_type": "Target"
-    },
-    {
-      "glass_id": "G00000002",
-      "lot_id": "LOT000001",
-      "work_date": "2024-01-15",
-      "total_defects": 1,
-      "group_type": "Others"
-    }
-  ],
-  "lot_results": [
-    {
-      "lot_id": "LOT000001",
-      "group_type": "Target",
-      "glass_count": 10,
-      "total_defects": 28,
-      "avg_defects": 2.8,
-      "max_defects": 5
-    },
-    {
-      "lot_id": "LOT000001",
-      "group_type": "Others",
-      "glass_count": 20,
-      "total_defects": 30,
-      "avg_defects": 1.5,
-      "max_defects": 4
-    }
-  ],
-  "daily_results": [
-    {
-      "work_date": "2024-01-15",
-      "group_type": "Target",
-      "glass_count": 120,
-      "total_defects": 336,
-      "avg_defects": 2.8
-    },
-    {
-      "work_date": "2024-01-15",
-      "group_type": "Others",
-      "glass_count": 4880,
-      "total_defects": 7320,
-      "avg_defects": 1.5
-    }
-  ],
-  "heatmap_results": [
-    {
-      "x": "AB",
-      "y": "1",
-      "defect_rate": 2.5,
-      "total_defects": 50,
-      "total_glasses": 20
-    }
-  ],
-  "metrics": {
-    "overall_defect_rate": 1.6,
-    "target_defect_rate": 2.8,
-    "others_defect_rate": 1.5,
-    "delta": -1.2,
-    "superiority_indicator": -1.3,
-    "target_glass_count": 120,
-    "others_glass_count": 4880
-  },
-  "pagination": {
-    "limit": 100,
-    "offset": 0,
-    "total_count": 5000,
-    "has_more": true
-  },
-  "created_at": "2024-01-15T05:30:10Z"
-}
-```
-
-**Metrics Explanation:**
-- `overall_defect_rate`: Average defects across all glasses
-- `target_defect_rate`: Average defects for Target group (glasses through selected equipment)
-- `others_defect_rate`: Average defects for Others group
-- `delta`: `overall_defect_rate - target_defect_rate` (negative if target is worse)
-- `superiority_indicator`: `others_defect_rate - target_defect_rate` (positive if target is better)
-
----
-
-### 4.4 Export Analysis Images [New]
-
-Export generated chart images (Daily Trend, Heatmap) for a specific equipment in an analysis job. Returns a ZIP file.
-
-#### Endpoint
-```
-GET /api/analyze/{jobId}/images
-```
-
-#### Query Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| equipment_id | string | **Yes** | Equipment ID to generate charts for |
-
-#### Request Example
-
-```bash
-curl -o charts.zip "http://localhost:8080/api/analyze/${JOB_ID}/images?equipment_id=EQ001"
-```
-
-#### Response (200 OK)
-- **Content-Type**: `application/zip`
-- **Body**: ZIP file containing `daily_trend.png`, `heatmap.svg`, etc.
-
----
-
-### 4.5 Get Equipment Rankings
-
-Get top equipments ranked by defect rate delta (overall rate - equipment rate). Higher delta means equipment causes fewer defects than average.
-
-#### Endpoint
+#### 엔드포인트
 ```
 GET /api/equipment/rankings
 ```
 
-#### Query Parameters
+#### 파라미터
 
-| Parameter | Type | Required | Description |
+| 파라미터 | 타입 | 필수 여부 | 설명 |
 |-----------|------|----------|-------------|
-| start_date | string | **Yes** | Start date (format: `YYYY-MM-DD`) |
-| end_date | string | **Yes** | End date (format: `YYYY-MM-DD`) |
-| defect_name | string | No | Filter by defect name |
-| limit | integer | No | Max results (default: 100) |
+| start_date | string | **필수** | 시작 일자 (`YYYY-MM-DD`) |
+| end_date | string | **필수** | 종료 일자 (`YYYY-MM-DD`) |
+| defect_name | string | 선택 | 불량명 필터 |
+| limit | integer | 선택 | 최대 결과 수 (기본값: 100) |
 
-#### Request Examples
-
-**Basic query:**
+#### 요청 예시
 ```bash
 curl "http://localhost:8080/api/equipment/rankings?start_date=2024-01-01&end_date=2024-12-31"
 ```
 
-**With defect filter:**
-```bash
-curl "http://localhost:8080/api/equipment/rankings?start_date=2024-01-01&end_date=2024-12-31&defect_name=SPOT-DARK"
-```
-
-**With limit:**
-```bash
-curl "http://localhost:8080/api/equipment/rankings?start_date=2024-01-01&end_date=2024-12-31&limit=50"
-```
-
-#### Response (200 OK)
-```json
-{
-  "rankings": [
-    {
-      "equipment_id": "EQ002",
-      "process_code": "P200",
-      "glass_count": 15000,
-      "total_defects": 18000,
-      "defect_rate": 1.2,
-      "overall_rate": 1.5,
-      "delta": 0.3
-    },
-    {
-      "equipment_id": "EQ001",
-      "process_code": "P100",
-      "glass_count": 10000,
-      "total_defects": 18000,
-      "defect_rate": 1.8,
-      "overall_rate": 1.5,
-      "delta": -0.3
-    }
-  ],
-  "count": 2
-}
-```
-
-**Delta Interpretation:**
-- **Positive delta**: Equipment performs better than average (good)
-- **Negative delta**: Equipment performs worse than average (problematic)
-- **Zero delta**: Equipment performs at average
-
 ---
 
-## Error Responses
+## 에러 응답
 
-### 400 Bad Request
-```json
-{
-  "error": "start_time and end_time are required (format: YYYY-MM-DD HH:MM:SS)"
-}
-```
-
-### 404 Not Found
-```json
-{
-  "error": "job not found"
-}
-```
-
-### 409 Conflict
-```json
-{
-  "error": "job is not completed yet"
-}
-```
-
-### 500 Internal Server Error
-```json
-{
-  "error": "query failed: database connection lost"
-}
-```
-
-### 503 Service Unavailable
-```json
-{
-  "error": "database health check failed"
-}
-```
-
----
-
-## Complete Workflow Example
-
-### Scenario: Daily Analysis Report
-
-```bash
-#!/bin/bash
-
-# 1. Ingest yesterday's data
-curl -X POST http://localhost:8080/api/ingest \
-  -H "Content-Type: application/json" \
-  -d '{
-    "start_time": "'$(date -u -d 'yesterday' +%Y-%m-%d)'T00:00:00Z",
-    "end_time": "'$(date -u -d 'yesterday' +%Y-%m-%d)'T23:59:59Z"
-  }'
-
-# 2. Refresh mart
-curl -X POST http://localhost:8080/api/mart/refresh
-
-# 3. Get equipment rankings
-curl -s "http://localhost:8080/api/equipment/rankings?start_date=$(date -d 'yesterday' +%Y-%m-%d)&end_date=$(date -d 'yesterday' +%Y-%m-%d)&defect_name=SPOT-DARK" \
-  | jq '.rankings[] | select(.delta < 0)'  # Show problematic equipment
-
-# 4. Analyze worst equipment
-WORST_EQ=$(curl -s "..." | jq -r '.rankings[0].equipment_id')
-
-JOB_ID=$(curl -s -X POST http://localhost:8080/api/analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "defect_name": "SPOT-DARK",
-    "start_date": "'$(date -d '30 days ago' +%Y-%m-%d)'",
-    "end_date": "'$(date +%Y-%m-%d)'",
-    "equipment_ids": ["'$WORST_EQ'"]
-  }' | jq -r '.job_id')
-
-# 5. Wait for completion
-while true; do
-  STATUS=$(curl -s "http://localhost:8080/api/analyze/${JOB_ID}/status" | jq -r '.status')
-  [[ "$STATUS" == "completed" ]] && break
-  sleep 2
-done
-
-# 6. Get results
-curl -s "http://localhost:8080/api/analyze/${JOB_ID}/results" | jq '.metrics'
-```
-
----
-
-## Rate Limiting & Best Practices
-
-1. **Analysis jobs**: Cached by request parameters. Identical requests return immediately.
-2. **Pagination**: Use `limit` and `offset` for large result sets.
-3. **Time range**: For inspection queries, limit to reasonable ranges (e.g., 1 month max) to avoid timeouts.
-4. **Concurrent requests**: Worker pool handles up to 4 concurrent analysis jobs by default.
-
----
-
-## Data Formats
-
-### Date/Time Formats
-
-- **RFC3339**: `2024-01-15T14:30:00Z` (for API requests)
-- **Date only**: `2024-01-15` (for start_date/end_date)
-- **SQL timestamp**: `2024-01-15 14:30:00` (for inspection/history queries)
-
-### Defect Name Format
-
-Extracted from `term_name` using elements 2 and 4:
-- `term_name`: `"TYPE1-SPOT-SIZE-DARK"`
-- `defect_name`: `"SPOT-DARK"`
-
-### Panel Address Format
-
-Calculated as `panel_id - product_id`:
-- `panel_id`: `"ABCDEFAB1"`
-- `product_id`: `"ABCDEF"`
-- `panel_addr`: `"AB1"`
+- **400 Bad Request**: 필수 파라미터 누락 또는 잘못된 형식.
+- **404 Not Found**: 요청한 Job ID를 찾을 수 없음.
+- **409 Conflict**: 작업이 아직 완료되지 않음.
+- **500 Internal Server Error**: 서버 내부 오류 (DB 연결 등).
