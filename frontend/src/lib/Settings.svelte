@@ -1,6 +1,10 @@
 <script>
-    import { createEventDispatcher } from "svelte";
-    import { updateConfig } from "./api.js";
+    import { createEventDispatcher, onMount } from "svelte";
+    import {
+        updateConfig,
+        getSchedulerConfig,
+        updateSchedulerConfig,
+    } from "./api.js";
 
     export let config;
 
@@ -8,16 +12,32 @@
     let saving = false;
     let error = null;
 
-    // Local state initialized from prop
-    let topNLimit = config.Analysis.TopNLimit;
-    let defaultPageSize = config.Analysis.DefaultPageSize;
-    let maxPageSize = config.Analysis.MaxPageSize;
+    // Local state initialized from prop with null safety
+    let topNLimit = config?.Analysis?.TopNLimit ?? 20;
+    let defaultPageSize = config?.Analysis?.DefaultPageSize ?? 20;
+    let maxPageSize = config?.Analysis?.MaxPageSize ?? 100;
 
     // Ensure defectTerms is array
-    let defectTerms = config.Settings?.DefectTerms
+    let defectTerms = config?.Settings?.DefectTerms
         ? [...config.Settings.DefectTerms]
         : [];
     let newDefect = "";
+
+    // Scheduler State
+    let schedulerConfig = { enabled: false, interval_minutes: 60 };
+    let schedulerLoading = false;
+
+    onMount(async () => {
+        try {
+            schedulerLoading = true;
+            const sc = await getSchedulerConfig();
+            schedulerConfig = sc;
+        } catch (e) {
+            console.error("Failed to load scheduler config", e);
+        } finally {
+            schedulerLoading = false;
+        }
+    });
 
     function addDefect() {
         if (newDefect.trim()) {
@@ -34,6 +54,7 @@
         saving = true;
         error = null;
         try {
+            // 1. Update App Config
             const payload = {
                 analysis: {
                     top_n_limit: parseInt(topNLimit),
@@ -44,8 +65,15 @@
                     defect_terms: defectTerms,
                 },
             };
-
             await updateConfig(payload);
+
+            // 2. Update Scheduler Config
+            const schedPayload = {
+                enabled: schedulerConfig.enabled,
+                interval_minutes: parseInt(schedulerConfig.interval_minutes),
+            };
+            await updateSchedulerConfig(schedPayload);
+
             alert("Settings saved successfully!");
             dispatch("saved");
         } catch (e) {
@@ -96,8 +124,39 @@
                 </div>
             </div>
 
-            <!-- Defect Terms Management -->
+            <!-- Scheduler Settings -->
             <div>
+                <h3 class="text-lg font-bold mb-4">Scheduler Settings</h3>
+                {#if schedulerLoading}
+                    <span class="loading loading-spinner"></span>
+                {:else}
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-4">
+                            <span class="label-text">Enable Auto-Ingestion</span
+                            >
+                            <input
+                                type="checkbox"
+                                class="toggle toggle-primary"
+                                bind:checked={schedulerConfig.enabled}
+                            />
+                        </label>
+                    </div>
+                    <div class="form-control w-full max-w-xs mt-4">
+                        <label class="label">
+                            <span class="label-text">Interval (Minutes)</span>
+                        </label>
+                        <input
+                            type="number"
+                            bind:value={schedulerConfig.interval_minutes}
+                            class="input input-bordered w-full max-w-xs rounded-xl"
+                        />
+                    </div>
+                {/if}
+            </div>
+
+            <!-- Defect Terms Management -->
+            <div class="md:col-span-2">
+                <div class="divider"></div>
                 <h3 class="text-lg font-bold mb-4">Defect Name Presets</h3>
                 <div class="flex gap-2 mb-4">
                     <input

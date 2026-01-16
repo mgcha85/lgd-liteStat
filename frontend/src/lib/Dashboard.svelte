@@ -635,110 +635,74 @@
     }
 </script>
 
-<!-- Modal: Ingest Settings -->
-{#if showIngestModal}
+<!-- Modal: Grid Settings -->
+{#if showGridModal}
     <div class="modal modal-open">
         <div class="modal-box">
-            <h3 class="font-bold text-lg mb-4">데이터 수집 및 스케줄러 설정</h3>
+            <h3 class="font-bold text-lg mb-4">Heatmap Grid Settings</h3>
 
-            <!-- Scheduler Settings -->
-            <div
-                class="collapse collapse-arrow border border-base-300 bg-base-100 rounded-box mb-4"
-            >
-                <input type="checkbox" checked />
-                <div class="collapse-title text-md font-medium">
-                    스케줄러 설정
-                </div>
-                <div class="collapse-content">
-                    <div class="form-control">
-                        <label class="label cursor-pointer">
-                            <span class="label-text">자동 수집 활성화</span>
-                            <input
-                                type="checkbox"
-                                class="toggle toggle-primary"
-                                bind:checked={schedulerConfig.enabled}
-                            />
-                        </label>
-                    </div>
-                    <div class="form-control">
-                        <label class="label">
-                            <span class="label-text">수집 주기 (분)</span>
-                        </label>
-                        <input
-                            type="number"
-                            bind:value={schedulerConfig.interval_minutes}
-                            class="input input-bordered"
-                        />
-                    </div>
-                    <div class="mt-2 text-right">
-                        <button
-                            class="btn btn-sm btn-primary"
-                            on:click={saveSchedulerSettings}>설정 저장</button
-                        >
-                    </div>
-                </div>
+            <div class="form-control w-full mb-4">
+                <label class="label">
+                    <span class="label-text">Select Model</span>
+                </label>
+                <select
+                    bind:value={activeGridModel}
+                    on:change={() => changeActiveGridModel(activeGridModel)}
+                    class="select select-bordered"
+                >
+                    {#each availableModels as model}
+                        <option value={model}>{model}</option>
+                    {/each}
+                </select>
             </div>
 
-            <!-- Manual Ingest -->
-            <div class="border border-base-300 p-4 rounded-box">
-                <h4 class="font-bold mb-2">수동 실행</h4>
-                <div class="form-control mb-2">
-                    <label class="label cursor-pointer justify-start gap-4">
-                        <input
-                            type="radio"
-                            name="ingestMode"
-                            class="radio radio-primary"
-                            value="incremental"
-                            bind:group={manualIngestMode}
-                        />
-                        <span class="label-text"
-                            >증분 수집 (최신 데이터 이후)</span
-                        >
-                    </label>
-                </div>
-                <div class="form-control mb-2">
-                    <label class="label cursor-pointer justify-start gap-4">
-                        <input
-                            type="radio"
-                            name="ingestMode"
-                            class="radio radio-primary"
-                            value="custom"
-                            bind:group={manualIngestMode}
-                        />
-                        <span class="label-text">기간 지정 (Backfill)</span>
-                    </label>
-                </div>
-
-                {#if manualIngestMode === "custom"}
-                    <div class="grid grid-cols-2 gap-2 mb-2">
-                        <input
-                            type="date"
-                            class="input input-bordered"
-                            bind:value={manualStart}
-                        />
-                        <input
-                            type="date"
-                            class="input input-bordered"
-                            bind:value={manualEnd}
-                        />
-                    </div>
-                {/if}
-
-                <button
-                    class="btn btn-primary"
-                    on:click={openIngestModal}
-                    disabled={loading}
+            <!-- New Model Add -->
+            <div class="flex gap-2 mb-4">
+                <input
+                    type="text"
+                    bind:value={newModelName}
+                    placeholder="New Model Name"
+                    class="input input-bordered flex-grow"
+                />
+                <button class="btn btn-outline" on:click={addNewModel}
+                    >Add</button
                 >
-                    {#if loading}
-                        <span class="loading loading-spinner"></span>
-                    {/if}
-                    Sync Data
-                </button>
+            </div>
+
+            <div class="form-control mb-2">
+                <label class="label">
+                    <span class="label-text"
+                        >X-Axis Labels (comma separated)</span
+                    >
+                </label>
+                <input
+                    type="text"
+                    bind:value={gridXInput}
+                    class="input input-bordered"
+                    placeholder="e.g. 1,2,3,4"
+                />
+            </div>
+
+            <div class="form-control mb-4">
+                <label class="label">
+                    <span class="label-text"
+                        >Y-Axis Labels (comma separated)</span
+                    >
+                </label>
+                <input
+                    type="text"
+                    bind:value={gridYInput}
+                    class="input input-bordered"
+                    placeholder="e.g. A,B,C,D"
+                />
             </div>
 
             <div class="modal-action">
-                <button class="btn" on:click={() => (showIngestModal = false)}
-                    >닫기</button
+                <button class="btn btn-primary" on:click={saveGridSettings}
+                    >Save</button
+                >
+                <button class="btn" on:click={() => (showGridModal = false)}
+                    >Close</button
                 >
             </div>
         </div>
@@ -753,7 +717,7 @@
                 Display Manufacturing Analysis
             </h1>
         </div>
-        <div class="flex-none">
+        <div class="flex-none gap-2">
             <!-- Theme Toggle: Unchecked=Black(Dark), Checked=Corporate(Light) -->
             <label class="swap swap-rotate btn btn-ghost btn-circle">
                 <input
