@@ -395,13 +395,13 @@ func (r *Repository) GetRecentAnalysisLogs(limit int) ([]AnalysisLog, error) {
 	return logs, nil
 }
 
-// EquipmentRanking represents equipment ranking data
-// EquipmentRanking represents equipment ranking data
+// EquipmentRanking represents equipment ranking data with hierarchy info
 type EquipmentRanking struct {
 	Rank              int     `json:"rank"`
-	EquipmentID       string  `json:"equipment_id"`
+	EquipmentGroupID  string  `json:"equipment_group_id"` // NEW: Equipment Group (e.g., CVD)
+	EquipmentID       string  `json:"equipment_id"`       // Equipment Line (e.g., CVD01)
 	ProcessCode       string  `json:"process_code"`
-	ModelCode         string  `json:"model_code"` // Added ModelCode
+	ModelCode         string  `json:"model_code"`
 	ProductCount      int     `json:"product_count"`
 	TotalDefects      int     `json:"total_defects"`
 	DefectRate        float64 `json:"defect_rate"`
@@ -445,20 +445,35 @@ func (r *Repository) GetEquipmentRankings(start, end time.Time, defectName strin
 	// Others_Avg = (Sum_All_Rates - Target_Rate) / (Count - 1)
 	// Overall_Avg = Sum_All_Rates / Count
 	query := fmt.Sprintf(`
-        WITH equipment_stats AS (
-            SELECT 
-                h.equipment_line_id,
-                h.process_code,
-                h.product_type_code, -- Group by Model
-                COUNT(DISTINCT h.product_id) as product_count, -- Distinct to handle child equipment duplicates
-                COUNT(DISTINCT i.panel_id) as total_defects
-            FROM lake_mgr.mas_pnl_prod_eqp_h h
-            LEFT JOIN lake_mgr.eas_pnl_ins_def_a i ON h.product_id = i.product_id -- JOIN ON product_id
-                AND i.process_code = h.process_code
-                %s
+        -- Step 1: Deduplicate product_id (keep latest record by move_in_ymdhms)
+        WITH deduplicated_history AS (
+            SELECT *, 
+                   ROW_NUMBER() OVER (
+                       PARTITION BY product_id, process_code, equipment_line_id
+                       ORDER BY move_in_ymdhms DESC
+                   ) as rn
+            FROM lake_mgr.mas_pnl_prod_eqp_h
             WHERE 1=1
             %s
-            GROUP BY h.equipment_line_id, h.process_code, h.product_type_code
+        ),
+        filtered_history AS (
+            SELECT * FROM deduplicated_history WHERE rn = 1
+        ),
+        -- Step 2: Extract equipment_group_id from equipment_line_id[2:6] and count defects
+        equipment_stats AS (
+            SELECT 
+                h.process_code,
+                SUBSTRING(h.equipment_line_id, 3, 4) as equipment_group_id,
+                h.equipment_line_id,
+                h.product_type_code,
+                COUNT(DISTINCT h.product_id) as product_count,
+                COUNT(DISTINCT i.panel_id) as total_defects
+            FROM filtered_history h
+            LEFT JOIN lake_mgr.eas_pnl_ins_def_a i 
+                ON h.product_id = i.product_id 
+                AND i.process_code = h.process_code
+                %s
+            GROUP BY h.process_code, SUBSTRING(h.equipment_line_id, 3, 4), h.equipment_line_id, h.product_type_code
         ),
         weighted_avg AS (
             SELECT 
@@ -469,9 +484,10 @@ func (r *Repository) GetEquipmentRankings(start, end time.Time, defectName strin
             WHERE product_count >= ?
         )
         SELECT 
+            e.equipment_group_id,
             e.equipment_line_id,
             e.process_code,
-            e.product_type_code, -- Model Code
+            e.product_type_code,
             e.product_count,
             COALESCE(e.total_defects::FLOAT / NULLIF(e.product_count, 0), 0) as defect_rate,
             COALESCE(w.overall_avg, 0) as overall_avg,
@@ -484,7 +500,7 @@ func (r *Repository) GetEquipmentRankings(start, end time.Time, defectName strin
         WHERE e.product_count >= ?
         ORDER BY delta ASC, e.equipment_line_id ASC
         %s
-    `, defectFilter, dateFilter, limitClause)
+    `, dateFilter, defectFilter, limitClause)
 
 	minProductCount := 10
 	params = append(params, minProductCount, minProductCount)
@@ -500,9 +516,9 @@ func (r *Repository) GetEquipmentRankings(start, end time.Time, defectName strin
 	for rows.Next() {
 		var r EquipmentRanking
 		r.Rank = rank
-		// Update Scan to include ModelCode
+		// Scan columns: equipment_group_id, equipment_line_id, process_code, product_type_code, product_count, defect_rate, overall_avg, delta
 		if err := rows.Scan(
-			&r.EquipmentID, &r.ProcessCode, &r.ModelCode, &r.ProductCount,
+			&r.EquipmentGroupID, &r.EquipmentID, &r.ProcessCode, &r.ModelCode, &r.ProductCount,
 			&r.DefectRate, &r.OverallDefectRate, &r.Delta,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan failed: %w", err)
