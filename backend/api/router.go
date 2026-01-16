@@ -30,7 +30,10 @@ func SetupRouter(h *Handler) *mux.Router {
 	r.HandleFunc("/api/config", h.GetConfig).Methods("GET")
 	r.HandleFunc("/api/config", h.UpdateConfig).Methods("PUT")
 	r.HandleFunc("/api/config/heatmap", h.GetHeatmapConfig).Methods("GET")
+	r.HandleFunc("/api/config/heatmap", h.GetHeatmapConfig).Methods("GET")
 	r.HandleFunc("/api/config/heatmap", h.UpdateHeatmapConfig).Methods("PUT")
+	r.HandleFunc("/api/config/scheduler", h.GetSchedulerConfig).Methods("GET")
+	r.HandleFunc("/api/config/scheduler", h.UpdateSchedulerConfig).Methods("PUT")
 
 	// Analysis endpoints
 	// Create a subrouter for /api/analyze paths
@@ -50,6 +53,10 @@ func SetupRouter(h *Handler) *mux.Router {
 
 	// System Performance
 	r.HandleFunc("/api/system/performance/requests", h.GetAnalysisLogs).Methods("GET")
+
+	// Static Images for Analysis Charts
+	// Serving from /app/data/images
+	r.PathPrefix("/api/images/").Handler(http.StripPrefix("/api/images/", http.FileServer(http.Dir("/app/data/images"))))
 
 	return r
 }

@@ -13,6 +13,8 @@
         getConfig,
         getHeatmapConfig,
         updateHeatmapConfig,
+        getSchedulerConfig,
+        updateSchedulerConfig,
         getExportUrl,
     } from "./api.js";
     import AnalysisCard from "./AnalysisCard.svelte";
@@ -63,6 +65,13 @@
     let gridYInput = "";
     let modelSearchQuery = "";
     let newModelName = "";
+
+    // Ingestion & Scheduler State
+    let showIngestModal = false;
+    let schedulerConfig = { enabled: true, interval_minutes: 60 };
+    let manualIngestMode = "incremental"; // "incremental" or "custom"
+    let manualStart = "";
+    let manualEnd = "";
 
     $: filteredGridModels = availableModels.filter((m) =>
         m.toLowerCase().includes(modelSearchQuery.toLowerCase()),
@@ -195,9 +204,28 @@
 
     function getFilteredRankings(data, pFilter, eFilter) {
         if (!data) return [];
-        return data;
-        // TEMPORARY: Bypass filters to force rendering
-        // logic commented out for now
+        let filtered = data;
+
+        // Filter by Selected Models
+        if (selectedModels.length > 0) {
+            filtered = filtered.filter((r) =>
+                selectedModels.includes(r.model_code),
+            );
+        }
+
+        // Filter by Process & Equipment (Client Side)
+        if (pFilter) {
+            filtered = filtered.filter((r) =>
+                r.process_code.toLowerCase().includes(pFilter.toLowerCase()),
+            );
+        }
+        if (eFilter) {
+            filtered = filtered.filter((r) =>
+                r.equipment_id.toLowerCase().includes(eFilter.toLowerCase()),
+            );
+        }
+
+        return filtered;
     }
 
     const BATCH_CHUNK_SIZE = 5;
@@ -412,10 +440,10 @@
     // Load Rankings
     async function loadRankings() {
         // Allow lookup without specific models
-        // if (selectedModels.length === 0) {
-        //     showToast("모델을 선택해주세요.", "error");
-        //     return;
-        // }
+        if (selectedModels.length === 0) {
+            showToast("모델을 선택해주세요.", "error");
+            return;
+        }
 
         loading = true;
         error = null;
@@ -534,22 +562,188 @@
         }
     }
 
-    async function handleIngest() {
-        loading = true;
+    // Toggle All Models
+    function toggleAllModels(e) {
+        if (e.target.checked) {
+            selectedModels = [...availableModels];
+        } else {
+            selectedModels = [];
+        }
+    }
+
+    // Ingestion Logic
+    async function openIngestModal() {
+        showIngestModal = true;
         try {
-            const start = new Date(startDate + "T00:00:00Z").toISOString();
-            const end = new Date(endDate + "T23:59:59Z").toISOString();
-            await triggerIngest(start, end);
+            const cfg = await getSchedulerConfig();
+            schedulerConfig = cfg;
+        } catch (e) {
+            console.error(e);
+            showToast("스케줄러 설정 로드 실패", "error");
+        }
+    }
+
+    async function saveSchedulerSettings() {
+        try {
+            // Ensure integer
+            schedulerConfig.interval_minutes = parseInt(
+                schedulerConfig.interval_minutes,
+            );
+            await updateSchedulerConfig(schedulerConfig);
+            showToast("스케줄러 설정 저장됨", "success");
+        } catch (e) {
+            showToast("설정 저장 실패: " + e.message, "error");
+        }
+    }
+
+    async function runManualIngest() {
+        loading = true;
+        showIngestModal = false; // Close modal start
+        try {
+            let start = "";
+            let end = "";
+
+            if (manualIngestMode === "custom") {
+                if (!manualStart || !manualEnd) {
+                    throw new Error("시작일과 종료일을 입력해주세요.");
+                }
+                start = manualStart;
+                end = manualEnd;
+                showToast(`수동 수집 시작 (${start} ~ ${end})`, "info");
+            } else {
+                showToast("증분 수집 시작 (최신 데이터 이후)", "info");
+            }
+
+            const counts = await triggerIngest(start, end);
+
+            // Format result message
+            let msg = "수집 완료: ";
+            for (const [k, v] of Object.entries(counts)) {
+                msg += `${k}=${v} `;
+            }
+            showToast(msg, "success");
+
             await refreshMart();
-            showToast("데이터 수집 및 갱신 완료!", "success");
+            showToast("데이터 마트 갱신 완료", "success");
             await loadRankings();
         } catch (e) {
+            console.error(e);
             showToast("수집 실패: " + e.message, "error");
         } finally {
             loading = false;
         }
     }
 </script>
+
+<!-- Modal: Ingest Settings -->
+{#if showIngestModal}
+    <div class="modal modal-open">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg mb-4">데이터 수집 및 스케줄러 설정</h3>
+
+            <!-- Scheduler Settings -->
+            <div
+                class="collapse collapse-arrow border border-base-300 bg-base-100 rounded-box mb-4"
+            >
+                <input type="checkbox" checked />
+                <div class="collapse-title text-md font-medium">
+                    스케줄러 설정
+                </div>
+                <div class="collapse-content">
+                    <div class="form-control">
+                        <label class="label cursor-pointer">
+                            <span class="label-text">자동 수집 활성화</span>
+                            <input
+                                type="checkbox"
+                                class="toggle toggle-primary"
+                                bind:checked={schedulerConfig.enabled}
+                            />
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">수집 주기 (분)</span>
+                        </label>
+                        <input
+                            type="number"
+                            bind:value={schedulerConfig.interval_minutes}
+                            class="input input-bordered"
+                        />
+                    </div>
+                    <div class="mt-2 text-right">
+                        <button
+                            class="btn btn-sm btn-primary"
+                            on:click={saveSchedulerSettings}>설정 저장</button
+                        >
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manual Ingest -->
+            <div class="border border-base-300 p-4 rounded-box">
+                <h4 class="font-bold mb-2">수동 실행</h4>
+                <div class="form-control mb-2">
+                    <label class="label cursor-pointer justify-start gap-4">
+                        <input
+                            type="radio"
+                            name="ingestMode"
+                            class="radio radio-primary"
+                            value="incremental"
+                            bind:group={manualIngestMode}
+                        />
+                        <span class="label-text"
+                            >증분 수집 (최신 데이터 이후)</span
+                        >
+                    </label>
+                </div>
+                <div class="form-control mb-2">
+                    <label class="label cursor-pointer justify-start gap-4">
+                        <input
+                            type="radio"
+                            name="ingestMode"
+                            class="radio radio-primary"
+                            value="custom"
+                            bind:group={manualIngestMode}
+                        />
+                        <span class="label-text">기간 지정 (Backfill)</span>
+                    </label>
+                </div>
+
+                {#if manualIngestMode === "custom"}
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <input
+                            type="date"
+                            class="input input-bordered"
+                            bind:value={manualStart}
+                        />
+                        <input
+                            type="date"
+                            class="input input-bordered"
+                            bind:value={manualEnd}
+                        />
+                    </div>
+                {/if}
+
+                <button
+                    class="btn btn-primary"
+                    on:click={openIngestModal}
+                    disabled={loading}
+                >
+                    {#if loading}
+                        <span class="loading loading-spinner"></span>
+                    {/if}
+                    Sync Data
+                </button>
+            </div>
+
+            <div class="modal-action">
+                <button class="btn" on:click={() => (showIngestModal = false)}
+                    >닫기</button
+                >
+            </div>
+        </div>
+    </div>
+{/if}
 
 <div class="p-6">
     <!-- Header with Theme Toggle -->
@@ -667,8 +861,11 @@
                             >
                                 <span class="truncate"
                                     >{selectedModels.length > 0
-                                        ? selectedModels.join(", ")
-                                        : "전체 모델"}</span
+                                        ? selectedModels.length ===
+                                          availableModels.length
+                                            ? "전체 모델"
+                                            : selectedModels.join(", ")
+                                        : "모델 선택 (필수)"}</span
                                 >
                                 <span class="text-xs">▼</span>
                             </div>
@@ -677,6 +874,25 @@
                                 tabindex="0"
                                 class="dropdown-content z-[999] menu p-2 shadow bg-base-100 rounded-box w-full max-h-60 overflow-y-auto block border border-gray-200"
                             >
+                                <li
+                                    class="border-b border-gray-200 pb-1 mb-1 sticky top-0 bg-base-100 z-10"
+                                >
+                                    <label
+                                        class="label cursor-pointer justify-start gap-2 hover:bg-base-200 font-bold"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            class="checkbox checkbox-xs"
+                                            checked={availableModels.length >
+                                                0 &&
+                                                selectedModels.length ===
+                                                    availableModels.length}
+                                            on:change={toggleAllModels}
+                                        />
+                                        <span class="label-text">전체 선택</span
+                                        >
+                                    </label>
+                                </li>
                                 {#each availableModels as model}
                                     <li>
                                         <label

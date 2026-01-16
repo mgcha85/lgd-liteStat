@@ -47,6 +47,11 @@ func main() {
 	}
 	log.Println("✓ Database schema created")
 
+	// Create images directory
+	if err := os.MkdirAll("/app/data/images", 0755); err != nil {
+		log.Printf("Warning: Failed to create images directory: %v", err)
+	}
+
 	// Check mock flag
 	if *mockFlag {
 		if err := etl.RunMockGeneration(repo, cfg); err != nil {
@@ -65,6 +70,15 @@ func main() {
 
 	// Initialize analyzer
 	analyzer := analysis.NewAnalyzer(db, repo, cfg, workerPool)
+
+	// Initialize Ingestor
+	ingestor := etl.NewDataIngestor(cfg, repo)
+
+	// Initialize Scheduler
+	scheduler := etl.NewScheduler(cfg, ingestor, martBuilder, repo)
+	scheduler.Start()
+	defer scheduler.Stop()
+	fmt.Println("✓ Scheduler started")
 
 	// Auto-Generate Mock Data on startup if enabled and empty
 	if cfg.MockData.Enabled && !*mockFlag {
@@ -106,7 +120,7 @@ func main() {
 	}()
 
 	// Initialize API handler
-	handler := api.NewHandler(db, repo, cfg, martBuilder, analyzer)
+	handler := api.NewHandler(db, repo, cfg, martBuilder, analyzer, ingestor)
 
 	// Setup router
 	router := api.SetupRouter(handler)
@@ -128,7 +142,7 @@ func main() {
 		fmt.Printf("✓ API server listening on %s\n", addr)
 		fmt.Println("\nAPI Endpoints:")
 		fmt.Println("  GET  /health")
-		fmt.Println("  POST /api/ingest")
+		fmt.Println("  POST /api/ingest (Support JSON body for backfill)")
 		fmt.Println("  POST /api/mart/refresh")
 		fmt.Println("  POST /api/cleanup")
 		fmt.Println("  POST /api/analyze")

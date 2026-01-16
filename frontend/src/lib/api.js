@@ -71,11 +71,11 @@ export async function getAnalysisResults(jobId, limit = 100, offset = 0) {
     return await response.json();
 }
 
-export async function triggerIngest(startTime, endTime) {
+export async function triggerIngest(startDate, endDate) {
     const response = await fetch(`${API_BASE}/ingest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start_time: startTime, end_time: endTime })
+        body: JSON.stringify({ start_date: startDate, end_date: endDate })
     });
     if (!response.ok) throw new Error('Failed to trigger ingestion');
     return await response.json();
@@ -105,6 +105,22 @@ export async function updateConfig(config) {
         body: JSON.stringify(config),
     });
     if (!response.ok) throw new Error("Failed to update config");
+    return response.json();
+}
+
+export async function getSchedulerConfig() {
+    const response = await fetch(`${API_BASE}/config/scheduler`);
+    if (!response.ok) throw new Error("Failed to load scheduler config");
+    return response.json();
+}
+
+export async function updateSchedulerConfig(config) {
+    const response = await fetch(`${API_BASE}/config/scheduler`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+    });
+    if (!response.ok) throw new Error("Failed to update scheduler config");
     return response.json();
 }
 

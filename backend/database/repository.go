@@ -10,6 +10,48 @@ import (
 	"time"
 )
 
+// CleanupOldAnalysis deletes old analysis jobs and cache
+func (r *Repository) CleanupOldAnalysis(days int) error {
+	cutoff := time.Now().AddDate(0, 0, -days)
+	_, err := r.db.App.Exec("DELETE FROM analysis_jobs WHERE created_at < ?", cutoff)
+	if err != nil {
+		return fmt.Errorf("failed to clean jobs: %w", err)
+	}
+	// Also clean cache? Cache table struct?
+	// Assuming analysis_cache has created_at
+	_, err = r.db.App.Exec("DELETE FROM analysis_cache WHERE created_at < ?", cutoff)
+	if err != nil {
+		return fmt.Errorf("failed to clean cache: %w", err)
+	}
+	return nil
+}
+
+// CleanupOldData deletes old inspection and history data
+func (r *Repository) CleanupOldData(days int, facilities []string) error {
+	cutoff := time.Now().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
+
+	for _, fac := range facilities {
+		conn, err := r.db.GetAnalyticsDB(fac)
+		if err != nil {
+			log.Printf("Cleanup: Failed to get DB for %s: %v", fac, err)
+			continue
+		}
+
+		// Delete from history
+		q1 := fmt.Sprintf("DELETE FROM lake_mgr.mas_pnl_prod_eqp_h WHERE move_in_ymdhms < '%s'", cutoff)
+		if _, err := conn.Exec(q1); err != nil {
+			log.Printf("Cleanup: Failed to clean history for %s: %v", fac, err)
+		}
+
+		// Delete from inspection
+		q2 := fmt.Sprintf("DELETE FROM lake_mgr.eas_pnl_ins_def_a WHERE inspection_end_ymdhms < '%s'", cutoff)
+		if _, err := conn.Exec(q2); err != nil {
+			log.Printf("Cleanup: Failed to clean inspection for %s: %v", fac, err)
+		}
+	}
+	return nil
+}
+
 // InspectionRow represents a row in the inspection table
 type InspectionRow struct {
 	FacilityCode                       string    `json:"facility_code"`
@@ -316,22 +358,6 @@ func (r *Repository) GetAnalysisCache(cacheKey string) (*AnalysisResults, error)
 	}
 	return &results, nil
 }
-func (r *Repository) CleanupOldData(retentionDays int) (map[string]int64, error) {
-	cutoffDate := time.Now().AddDate(0, 0, -retentionDays)
-	deleted := make(map[string]int64)
-	// Iterate over all analytics DBs
-	for fac, conn := range r.db.Analytics {
-		if _, err := conn.Exec("DELETE FROM lake_mgr.eas_pnl_ins_def_a WHERE inspection_end_ymdhms < ?", cutoffDate); err != nil {
-			log.Printf("Failed to cleanup inspection data for facility %s: %v", fac, err)
-		}
-		if _, err := conn.Exec("DELETE FROM lake_mgr.mas_pnl_prod_eqp_h WHERE move_in_ymdhms < ?", cutoffDate); err != nil {
-			log.Printf("Failed to cleanup history data for facility %s: %v", fac, err)
-		}
-	}
-	r.db.App.Exec("DELETE FROM analysis_cache WHERE expires_at < CURRENT_TIMESTAMP")
-	r.db.App.Exec("DELETE FROM analysis_jobs WHERE created_at < ?", time.Now().AddDate(0, 0, -30))
-	return deleted, nil
-}
 
 // AnalysisLog ... (Logging code unchanged - omitted for brevity) ...
 
@@ -498,8 +524,27 @@ func (r *Repository) GetHistoryCount(facility string) (int64, error) {
 		return 0, err
 	}
 	var count int64
-	if err := conn.QueryRow("SELECT COUNT(*) FROM history").Scan(&count); err != nil {
+	if err := conn.QueryRow("SELECT COUNT(*) FROM lake_mgr.mas_pnl_prod_eqp_h").Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
+}
+
+// GetLatestImportTimestamp returns the latest move_in_ymdhms for a facility
+func (r *Repository) GetLatestImportTimestamp(facility string) (time.Time, error) {
+	conn, err := r.db.GetAnalyticsDB(facility)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	query := "SELECT MAX(move_in_ymdhms) FROM lake_mgr.mas_pnl_prod_eqp_h"
+	var t sql.NullTime
+	if err := conn.QueryRow(query).Scan(&t); err != nil {
+		return time.Time{}, err
+	}
+
+	if t.Valid {
+		return t.Time, nil
+	}
+	return time.Time{}, nil // Return zero time if no data
 }

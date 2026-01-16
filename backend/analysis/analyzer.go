@@ -133,10 +133,17 @@ func (a *Analyzer) executeAnalysis(jobID, cacheKey string, req AnalysisRequest) 
 	}
 	a.repo.UpdateAnalysisJob(jobID, "running", "", "", 75)
 
-	heatmapResults, err := a.queryHeatmap(req)
-	if err != nil {
-		a.repo.UpdateAnalysisJob(jobID, "failed", "", err.Error(), 75)
-		return err
+	// Heatmap: Only if exactly one model is selected
+	var heatmapResults []database.HeatmapCell
+	if len(req.ModelCodes) == 1 {
+		heatmapResults, err = a.queryHeatmap(req)
+		if err != nil {
+			a.repo.UpdateAnalysisJob(jobID, "failed", "", err.Error(), 75)
+			return err
+		}
+	} else {
+		// Skip heatmap for multi-model or all-model analysis
+		heatmapResults = []database.HeatmapCell{}
 	}
 
 	metrics := a.calculateMetrics(glassResults)

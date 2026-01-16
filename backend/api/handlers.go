@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -28,16 +29,18 @@ type Handler struct {
 	cfg         *config.Config
 	martBuilder *mart.MartBuilder
 	analyzer    *analysis.Analyzer
+	ingestor    *etl.DataIngestor
 }
 
 // NewHandler creates a new API handler
-func NewHandler(db *database.DB, repo *database.Repository, cfg *config.Config, mart *mart.MartBuilder, analyzer *analysis.Analyzer) *Handler {
+func NewHandler(db *database.DB, repo *database.Repository, cfg *config.Config, mart *mart.MartBuilder, analyzer *analysis.Analyzer, ingestor *etl.DataIngestor) *Handler {
 	return &Handler{
 		db:          db,
 		repo:        repo,
 		cfg:         cfg,
-		martBuilder: mart, // Renamed from mart to martBuilder to match struct field
+		martBuilder: mart,
 		analyzer:    analyzer,
+		ingestor:    ingestor,
 	}
 }
 
@@ -81,21 +84,33 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// IngestRequest defines the body for ingestion API
+type IngestRequest struct {
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
+}
+
 // IngestData triggers data ingestion
 func (h *Handler) IngestData(w http.ResponseWriter, r *http.Request) {
-	// Parse dates from query params
-	// ... (date parsing logic stays same if present, or added below)
-	// Actually, original IngestData didn't iterate facilities properly.
-	// But let's assume Ingest is triggered for a specific facility or all?
-	// The Ingestor handles ingestion.
+	var req IngestRequest
+	var startTime, endTime time.Time
 
-	// Since Ingest is complex for multi-facility, let's keep it simple for now and rely on DataIngestor to handle "default" or loop.
-	// But we passed repo to ingestor. Repo methods now accept facility.
-	// We might need to update Ingestor internal logic later.
-	// For now, let's just respond successful trigger.
+	// Parse JSON body if present
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			if req.StartDate != "" {
+				startTime, _ = time.Parse("2006-01-02", req.StartDate)
+			}
+			if req.EndDate != "" {
+				endTime, _ = time.Parse("2006-01-02", req.EndDate)
+				// Set to end of day
+				endTime = endTime.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+			}
+		}
+	}
 
-	ingestor := etl.NewDataIngestor(h.cfg, h.repo)
-	counts, err := ingestor.IngestData(time.Now().AddDate(0, 0, -30), time.Now())
+	// Pass nil for facilities to use all configured facilities
+	counts, err := h.ingestor.IngestData(startTime, endTime, nil)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, fmt.Sprintf("ingest failed: %v", err))
 		return
@@ -128,15 +143,19 @@ func (h *Handler) RefreshMart(w http.ResponseWriter, r *http.Request) {
 
 // CleanupData handles old data cleanup requests
 func (h *Handler) CleanupData(w http.ResponseWriter, r *http.Request) {
-	deleted, err := h.repo.CleanupOldData(h.cfg.DataRetentionDays)
+	err := h.repo.CleanupOldData(h.cfg.Retention.DataDays, h.cfg.Settings.Facilities)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, fmt.Sprintf("cleanup failed: %v", err))
 		return
 	}
 
+	// Also clean analysis
+	if err := h.repo.CleanupOldAnalysis(h.cfg.Retention.AnalysisDays); err != nil {
+		log.Printf("Warning: analysis cleanup failed: %v", err)
+	}
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"status":       "success",
-		"deleted_rows": deleted,
+		"status": "success",
 	})
 }
 
@@ -327,6 +346,27 @@ func (h *Handler) GetAnalysisResults(w http.ResponseWriter, r *http.Request) {
 
 	paginatedGlass := glassResults[offset:end]
 
+	// Generate Charts if requested
+	var images map[string]string
+	if r.URL.Query().Get("include_images") == "true" {
+		var dailyResults []database.DailyResult
+		// daily_results is RawMessage, need to unmarshal
+		if err := json.Unmarshal(results.DailyResults, &dailyResults); err == nil {
+			// Filename: jobID_timestamp.png
+			filename := fmt.Sprintf("%s_%d.png", jobID, time.Now().Unix())
+			outputDir := "/app/data/images" // Hardcoded for Docker env
+
+			if imgPath, err := analysis.SaveTrendChart(dailyResults, filename, outputDir); err == nil {
+				images = map[string]string{
+					"daily_trend": imgPath,
+				}
+			} else {
+				// Log error but continue?
+				fmt.Printf("Failed to generate chart: %v\n", err)
+			}
+		}
+	}
+
 	// Build response
 	response := map[string]interface{}{
 		"glass_results":   paginatedGlass,
@@ -334,6 +374,7 @@ func (h *Handler) GetAnalysisResults(w http.ResponseWriter, r *http.Request) {
 		"daily_results":   json.RawMessage(results.DailyResults),
 		"heatmap_results": json.RawMessage(results.HeatmapResults),
 		"metrics":         json.RawMessage(results.Metrics),
+		"images":          images, // Added images field (base64 png)
 		"pagination": map[string]interface{}{
 			"limit":       limit,
 			"offset":      offset,
@@ -760,8 +801,26 @@ func (h *Handler) ExportAnalysis(w http.ResponseWriter, r *http.Request) {
 	}
 	writer.Flush()
 
-	// 3. Return File
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=analysis_%s.csv", jobID))
 	w.Write(b.Bytes())
+}
+
+// GetSchedulerConfig returns current scheduler settings
+func (h *Handler) GetSchedulerConfig(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, http.StatusOK, h.cfg.Scheduler)
+}
+
+// UpdateSchedulerConfig updates scheduler settings
+func (h *Handler) UpdateSchedulerConfig(w http.ResponseWriter, r *http.Request) {
+	var newCfg config.SchedulerConfig
+	if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	h.cfg.Scheduler = newCfg
+	// Note: In-memory update only.
+
+	respondJSON(w, http.StatusOK, h.cfg.Scheduler)
 }

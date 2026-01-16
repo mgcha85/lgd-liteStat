@@ -59,6 +59,19 @@ type Config struct {
 
 	// Heatmap Config Manager
 	HeatmapManager *HeatmapConfigManager
+
+	// Scheduler
+	Scheduler SchedulerConfig `mapstructure:"scheduler"`
+
+	// Retention
+	Retention RetentionConfig `mapstructure:"retention"`
+}
+
+// RetentionConfig holds data retention settings
+type RetentionConfig struct {
+	AnalysisDays int    `mapstructure:"analysis_days"`
+	DataDays     int    `mapstructure:"data_days"`
+	CleanupTime  string `mapstructure:"cleanup_time"` // Format: "15:04"
 }
 
 // SettingsConfig holds UI-controllable settings
