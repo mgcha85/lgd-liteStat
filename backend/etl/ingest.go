@@ -49,13 +49,13 @@ func (d *DataIngestor) ingestMockData() (map[string]int, error) {
 
 	// Generate inspection data
 	inspectionData := generator.GenerateInspectionData()
-	if err := d.repo.BulkInsertInspection(inspectionData); err != nil {
+	if err := d.repo.BulkInsertInspection(inspectionData, "default"); err != nil { // TODO: Support facility selection
 		return nil, fmt.Errorf("failed to insert inspection data: %w", err)
 	}
 
 	// Generate history data
 	historyData := generator.GenerateHistoryData()
-	if err := d.repo.BulkInsertHistory(historyData); err != nil {
+	if err := d.repo.BulkInsertHistory(historyData, "default"); err != nil { // TODO: Support facility selection
 		return nil, fmt.Errorf("failed to insert history data: %w", err)
 	}
 

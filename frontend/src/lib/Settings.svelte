@@ -56,12 +56,12 @@
     }
 </script>
 
-<div class="card bg-base-100 shadow-xl max-w-4xl mx-auto mt-8">
+<div class="card bg-base-100 shadow-xl max-w-4xl mx-auto mt-8 rounded-3xl">
     <div class="card-body">
         <h2 class="card-title text-2xl mb-6">⚙️ Application Settings</h2>
 
         {#if error}
-            <div class="alert alert-error mb-4">
+            <div class="alert alert-error mb-4 rounded-xl">
                 <span>{error}</span>
             </div>
         {/if}
@@ -77,7 +77,7 @@
                     <input
                         type="number"
                         bind:value={topNLimit}
-                        class="input input-bordered w-full max-w-xs"
+                        class="input input-bordered w-full max-w-xs rounded-xl"
                     />
                     <label class="label">
                         <span class="label-text-alt">Rankings to show</span>
@@ -91,7 +91,7 @@
                     <input
                         type="number"
                         bind:value={defaultPageSize}
-                        class="input input-bordered w-full max-w-xs"
+                        class="input input-bordered w-full max-w-xs rounded-xl"
                     />
                 </div>
             </div>
@@ -104,30 +104,29 @@
                         type="text"
                         bind:value={newDefect}
                         placeholder="Add new defect term"
-                        class="input input-bordered flex-grow"
+                        class="input input-bordered flex-grow rounded-xl"
                         on:keydown={(e) => e.key === "Enter" && addDefect()}
                     />
-                    <button class="btn btn-primary" on:click={addDefect}
-                        >Add</button
+                    <button
+                        class="btn btn-primary rounded-xl"
+                        on:click={addDefect}>Add</button
                     >
                 </div>
 
-                <div class="bg-base-200 rounded-box p-4 h-64 overflow-y-auto">
+                <div class="bg-base-200 rounded-2xl p-4 h-64 overflow-y-auto">
                     {#if defectTerms.length === 0}
                         <p class="text-gray-500 text-center py-4">
                             No defect terms defined.
                         </p>
                     {:else}
-                        <ul class="menu bg-base-100 w-full rounded-box">
+                        <ul class="menu bg-base-100 w-full rounded-xl">
                             {#each defectTerms as term, i}
                                 <li
-                                    class="flex flex-row justify-between items-center p-2 mb-1 border-b last:border-0 border-base-200"
+                                    class="flex flex-row justify-between items-center p-2 mb-1 border-b last:border-0 border-base-200 rounded-lg font-medium"
                                 >
-                                    <span class="font-medium bg-transparent"
-                                        >{term}</span
-                                    >
+                                    <span class="bg-transparent">{term}</span>
                                     <button
-                                        class="btn btn-ghost btn-xs text-error"
+                                        class="btn btn-ghost btn-xs text-error rounded-md"
                                         on:click={() => removeDefect(i)}
                                     >
                                         🗑️
@@ -142,7 +141,7 @@
 
         <div class="card-actions justify-end mt-8">
             <button
-                class="btn btn-primary"
+                class="btn btn-primary rounded-xl"
                 on:click={handleSave}
                 disabled={saving}
             >

@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS analysis_cache (
     daily_results TEXT,    -- JSON stored as TEXT
     heatmap_results TEXT,  -- JSON stored as TEXT
     metrics TEXT,          -- JSON stored as TEXT
+    batch_results TEXT,    -- NEW: JSON map of AnalysisResults for Batch
     created_at DATETIME,
     expires_at DATETIME
 );

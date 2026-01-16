@@ -35,7 +35,7 @@ func main() {
 	fmt.Println("✓ Configuration loaded")
 
 	// Initialize databases
-	db, err := database.Initialize(cfg.DBPath, "./data/app.db")
+	db, err := database.Initialize(cfg.DBPath, cfg.Settings.Facilities, "./data/app.db")
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -65,6 +65,45 @@ func main() {
 
 	// Initialize analyzer
 	analyzer := analysis.NewAnalyzer(db, repo, cfg, workerPool)
+
+	// Auto-Generate Mock Data on startup if enabled and empty
+	if cfg.MockData.Enabled && !*mockFlag {
+		log.Println("Checking for existing data...")
+		hasData := false
+		fac := "default"
+		if len(cfg.Settings.Facilities) > 0 {
+			fac = cfg.Settings.Facilities[0]
+		}
+
+		if count, err := repo.GetHistoryCount(fac); err == nil && count > 0 {
+			hasData = true
+		}
+
+		if !hasData {
+			log.Println("No data found. Generating Mock Data...")
+			if err := etl.RunMockGeneration(repo, cfg); err != nil {
+				log.Printf("Failed to generate mock data: %v", err)
+			} else {
+				log.Println("✓ Mock Data Generated")
+			}
+		}
+	}
+
+	// Refresh Data Mart (Equipment Stats)
+	log.Println("Building Data Mart (Equipment Rankings)...")
+	go func() {
+		facilities := cfg.Settings.Facilities
+		if len(facilities) == 0 {
+			facilities = []string{"default"}
+		}
+
+		for _, fac := range facilities {
+			if _, err := martBuilder.Refresh(fac); err != nil {
+				log.Printf("Failed to refresh mart for %s: %v", fac, err)
+			}
+		}
+		log.Println("✓ Data Mart Ready")
+	}()
 
 	// Initialize API handler
 	handler := api.NewHandler(db, repo, cfg, martBuilder, analyzer)

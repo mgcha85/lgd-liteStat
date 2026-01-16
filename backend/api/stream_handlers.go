@@ -113,7 +113,7 @@ func (h *Handler) AnalyzeStream(w http.ResponseWriter, r *http.Request) {
 	for res := range results {
 		if res.Result != nil {
 			if ar, ok := res.Result.(*database.AnalysisResults); ok {
-				var m analysis.AnalysisMetrics
+				var m database.AnalysisMetrics
 				if err := json.Unmarshal(ar.Metrics, &m); err == nil {
 					totalGlassCount += m.TargetGlassCount + m.OthersGlassCount
 				}

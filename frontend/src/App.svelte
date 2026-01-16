@@ -41,6 +41,7 @@
       <ul class="menu menu-horizontal px-1 gap-2">
         <li>
           <button
+            class="rounded-xl transition-all duration-300"
             class:active={activeTab === "dashboard"}
             class:btn-active={activeTab === "dashboard"}
             on:click={() => (activeTab = "dashboard")}
@@ -50,6 +51,7 @@
         </li>
         <li>
           <button
+            class="rounded-xl transition-all duration-300"
             class:active={activeTab === "settings"}
             class:btn-active={activeTab === "settings"}
             on:click={() => (activeTab = "settings")}

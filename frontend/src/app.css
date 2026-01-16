@@ -1,3 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+body {
+  font-family: 'Inter', sans-serif;
+  @apply tracking-tight;
+}
+
+.card {
+  @apply bg-base-100/50 backdrop-blur-md border border-base-content/5 shadow-xl transition-all duration-300 rounded-3xl;
+}
+
+.card:hover {
+  @apply border-primary/30 shadow-2xl;
+}
+
+.btn {
+  @apply rounded-xl;
+}
+
+.input,
+.select {
+  @apply rounded-xl;
+}
+
+/* Custom Scrollbar for Webkit */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-base-200;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-base-content/20 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-base-content/40;
+}

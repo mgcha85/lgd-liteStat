@@ -6,6 +6,7 @@ export async function getEquipmentRankings(filters = {}) {
     if (filters.end_date) params.append('end_date', filters.end_date);
     if (filters.defect_name) params.append('defect_name', filters.defect_name);
     if (filters.limit) params.append('limit', filters.limit);
+    if (filters.facility) params.append('facility', filters.facility);
 
     const response = await fetch(`${API_BASE}/equipment/rankings?${params}`);
     if (!response.ok) throw new Error('Failed to fetch rankings');
@@ -80,8 +81,11 @@ export async function triggerIngest(startTime, endTime) {
     return await response.json();
 }
 
-export async function refreshMart() {
-    const response = await fetch(`${API_BASE}/mart/refresh`, {
+export async function refreshMart(facility) {
+    const params = new URLSearchParams();
+    if (facility) params.append("facility", facility);
+
+    const response = await fetch(`${API_BASE}/mart/refresh?${params}`, {
         method: "POST",
     });
     if (!response.ok) throw new Error("Mart refresh failed");
@@ -179,4 +183,24 @@ export async function analyzeGlass(glassId) {
     const response = await fetch(`${API_BASE}/analyze/glass/${glassId}`);
     if (!response.ok) throw new Error("Glass analysis failed");
     return response.json();
+}
+
+export async function getHeatmapConfig() {
+    const response = await fetch(`${API_BASE}/config/heatmap`);
+    if (!response.ok) throw new Error("Failed to load heatmap config");
+    return response.json();
+}
+
+export async function updateHeatmapConfig(config) {
+    const response = await fetch(`${API_BASE}/config/heatmap`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+    });
+    if (!response.ok) throw new Error("Failed to update heatmap config");
+    return response.json();
+}
+
+export function getExportUrl(jobId) {
+    return `${API_BASE}/analyze/${jobId}/export`;
 }

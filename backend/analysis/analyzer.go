@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -24,14 +25,17 @@ type AnalysisRequest struct {
 	EndDate      string   `json:"end_date"`
 	ProcessCodes []string `json:"process_codes,omitempty"`
 	EquipmentIDs []string `json:"equipment_ids,omitempty"`
+	ModelCodes   []string `json:"model_codes,omitempty"`
+	FacilityCode string   `json:"facility_code"` // NEW
 }
 
 // BatchAnalysisRequest for processing multiple equipments
 type BatchAnalysisRequest struct {
-	DefectName string           `json:"defect_name"`
-	StartDate  string           `json:"start_date"`
-	EndDate    string           `json:"end_date"`
-	Targets    []AnalysisTarget `json:"targets"`
+	DefectName   string           `json:"defect_name"`
+	StartDate    string           `json:"start_date"`
+	EndDate      string           `json:"end_date"`
+	Targets      []AnalysisTarget `json:"targets"`
+	FacilityCode string           `json:"facility_code"` // NEW
 }
 
 type AnalysisTarget struct {
@@ -48,54 +52,7 @@ type GlassData struct {
 	PanelMap     []int64 // Assuming DuckDB returns slice, or we scan string and parse
 }
 
-// GlassResult represents glass-level analysis result
-type GlassResult struct {
-	GlassID      string `json:"glass_id"`
-	LotID        string `json:"lot_id"`
-	WorkDate     string `json:"work_date"`
-	TotalDefects int    `json:"total_defects"`
-	GroupType    string `json:"group_type"` // "Target" or "Others"
-}
-
-// LotResult represents lot-level aggregation
-type LotResult struct {
-	LotID        string  `json:"lot_id"`
-	GroupType    string  `json:"group_type"`
-	GlassCount   int     `json:"glass_count"`
-	TotalDefects int     `json:"total_defects"`
-	AvgDefects   float64 `json:"avg_defects"`
-	MaxDefects   int     `json:"max_defects"`
-}
-
-// DailyResult represents daily time series
-type DailyResult struct {
-	WorkDate     string  `json:"work_date"`
-	GroupType    string  `json:"group_type"`
-	GlassCount   int     `json:"glass_count"`
-	TotalDefects int     `json:"total_defects"`
-	AvgDefects   float64 `json:"avg_defects"`
-}
-
-// HeatmapCell represents a cell in the heatmap
-type HeatmapCell struct {
-	GroupType    string  `json:"group_type"` // "Target" or "Others"
-	X            string  `json:"x"`
-	Y            string  `json:"y"`
-	DefectRate   float64 `json:"defect_rate"`
-	TotalDefects int     `json:"total_defects"`
-	TotalGlasses int     `json:"total_glasses"`
-}
-
-// AnalysisMetrics contains summary statistics
-type AnalysisMetrics struct {
-	OverallDefectRate    float64 `json:"overall_defect_rate"`
-	TargetDefectRate     float64 `json:"target_defect_rate"`
-	OthersDefectRate     float64 `json:"others_defect_rate"`
-	Delta                float64 `json:"delta"`                 // overall - target
-	SuperiorityIndicator float64 `json:"superiority_indicator"` // positive if target < others
-	TargetGlassCount     int     `json:"target_glass_count"`
-	OthersGlassCount     int     `json:"others_glass_count"`
-}
+// AnalysisMetrics moved to database
 
 // Analyzer handles analysis execution
 type Analyzer struct {
@@ -220,7 +177,12 @@ func (a *Analyzer) executeAnalysis(jobID, cacheKey string, req AnalysisRequest) 
 }
 
 // queryGlassLevel executes glass-level query
-func (a *Analyzer) queryGlassLevel(req AnalysisRequest) ([]GlassResult, error) {
+func (a *Analyzer) queryGlassLevel(req AnalysisRequest) ([]database.GlassResult, error) {
+	conn, err := a.db.GetAnalyticsDB(req.FacilityCode)
+	if err != nil {
+		return nil, err
+	}
+
 	// Build query with dynamic aggregation
 	query := `
 		WITH glass_stats AS (
@@ -254,7 +216,20 @@ func (a *Analyzer) queryGlassLevel(req AnalysisRequest) ([]GlassResult, error) {
 		}
 		query += ")"
 	} else {
-		return []GlassResult{}, nil
+		return []database.GlassResult{}, nil
+	}
+
+	// Add Model Filter
+	if len(req.ModelCodes) > 0 {
+		query += ` AND h.product_type_code IN (`
+		for i, mc := range req.ModelCodes {
+			if i > 0 {
+				query += ","
+			}
+			query += "?"
+			args = append(args, mc)
+		}
+		query += ")"
 	}
 
 	query += `
@@ -279,15 +254,15 @@ func (a *Analyzer) queryGlassLevel(req AnalysisRequest) ([]GlassResult, error) {
 
 	query += ` ORDER BY m.work_date, m.product_id`
 
-	rows, err := a.db.Analytics.Query(query, args...)
+	rows, err := conn.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query glass level: %w", err)
 	}
 	defer rows.Close()
 
-	results := []GlassResult{}
+	var results []database.GlassResult
 	for rows.Next() {
-		var r GlassResult
+		var r database.GlassResult
 		if err := rows.Scan(&r.GlassID, &r.LotID, &r.WorkDate, &r.TotalDefects, &r.GroupType); err != nil {
 			return nil, err
 		}
@@ -298,7 +273,11 @@ func (a *Analyzer) queryGlassLevel(req AnalysisRequest) ([]GlassResult, error) {
 }
 
 // queryLotLevel executes lot-level aggregation
-func (a *Analyzer) queryLotLevel(req AnalysisRequest) ([]LotResult, error) {
+func (a *Analyzer) queryLotLevel(req AnalysisRequest) ([]database.LotResult, error) {
+	conn, err := a.db.GetAnalyticsDB(req.FacilityCode)
+	if err != nil {
+		return nil, err
+	}
 	// Similar dynamic aggregation
 	query := `
 		WITH glass_stats AS (
@@ -330,7 +309,7 @@ func (a *Analyzer) queryLotLevel(req AnalysisRequest) ([]LotResult, error) {
 		}
 		query += ")"
 	} else {
-		return []LotResult{}, nil
+		return []database.LotResult{}, nil
 	}
 
 	query += `
@@ -355,15 +334,15 @@ func (a *Analyzer) queryLotLevel(req AnalysisRequest) ([]LotResult, error) {
 
 	query += ` GROUP BY m.lot_id, group_type ORDER BY m.lot_id`
 
-	rows, err := a.db.Analytics.Query(query, args...)
+	rows, err := conn.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query lot level: %w", err)
 	}
 	defer rows.Close()
 
-	results := []LotResult{}
+	results := []database.LotResult{}
 	for rows.Next() {
-		var r LotResult
+		var r database.LotResult
 		if err := rows.Scan(&r.LotID, &r.GroupType, &r.GlassCount, &r.TotalDefects, &r.AvgDefects, &r.MaxDefects); err != nil {
 			return nil, err
 		}
@@ -373,7 +352,11 @@ func (a *Analyzer) queryLotLevel(req AnalysisRequest) ([]LotResult, error) {
 }
 
 // queryDailyLevel retrieves daily defect trends sorted by date
-func (a *Analyzer) queryDailyLevel(req AnalysisRequest) ([]DailyResult, error) {
+func (a *Analyzer) queryDailyLevel(req AnalysisRequest) ([]database.DailyResult, error) {
+	conn, err := a.db.GetAnalyticsDB(req.FacilityCode)
+	if err != nil {
+		return nil, err
+	}
 	query := `
 		SELECT 
 			strftime(h.move_in_ymdhms, '%Y-%m-%d') as work_date,
@@ -389,14 +372,32 @@ func (a *Analyzer) queryDailyLevel(req AnalysisRequest) ([]DailyResult, error) {
 	`
 	args := []interface{}{req.StartDate, req.EndDate}
 
+	// Filter by Equipment & Process (Multiple)
 	if len(req.EquipmentIDs) > 0 {
-		query += ` AND h.equipment_line_id IN (`
-		for i, eq := range req.EquipmentIDs {
+		placeholders := strings.Repeat("?,", len(req.EquipmentIDs))
+		placeholders = strings.TrimSuffix(placeholders, ",")
+		query += fmt.Sprintf(" AND h.equipment_line_id IN (%s)", placeholders)
+		for _, e := range req.EquipmentIDs {
+			args = append(args, e)
+		}
+	}
+	if len(req.ProcessCodes) > 0 {
+		placeholders := strings.Repeat("?,", len(req.ProcessCodes))
+		placeholders = strings.TrimSuffix(placeholders, ",")
+		query += fmt.Sprintf(" AND h.process_code IN (%s)", placeholders)
+		for _, p := range req.ProcessCodes {
+			args = append(args, p)
+		}
+	}
+
+	if len(req.ModelCodes) > 0 {
+		query += ` AND h.product_type_code IN (`
+		for i, mc := range req.ModelCodes {
 			if i > 0 {
 				query += ","
 			}
 			query += "?"
-			args = append(args, eq)
+			args = append(args, mc)
 		}
 		query += ")"
 	}
@@ -408,21 +409,24 @@ func (a *Analyzer) queryDailyLevel(req AnalysisRequest) ([]DailyResult, error) {
 
 	query += ` GROUP BY work_date, group_type ORDER BY work_date ASC`
 
-	rows, err := a.db.Analytics.Query(query, args...)
+	rows, err := conn.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query daily level: %w", err)
+		return nil, fmt.Errorf("query fail: %w", err)
 	}
 	defer rows.Close()
 
-	results := []DailyResult{}
+	var results []database.DailyResult
 	for rows.Next() {
-		var r DailyResult
+		var r database.DailyResult
+		var totalDefects, glassCount int
 		// Scan matches SELECT order: work_date, group_type, total_defects, glass_count
-		if err := rows.Scan(&r.WorkDate, &r.GroupType, &r.TotalDefects, &r.GlassCount); err != nil {
+		if err := rows.Scan(&r.WorkDate, &r.GroupType, &totalDefects, &glassCount); err != nil {
 			return nil, err
 		}
-		if r.GlassCount > 0 {
-			r.AvgDefects = float64(r.TotalDefects) / float64(r.GlassCount)
+		r.TotalDefects = totalDefects
+		r.GlassCount = glassCount
+		if glassCount > 0 {
+			r.AvgDefects = float64(totalDefects) / float64(glassCount)
 		}
 		results = append(results, r)
 	}
@@ -433,52 +437,152 @@ func (a *Analyzer) queryDailyLevel(req AnalysisRequest) ([]DailyResult, error) {
 }
 
 // queryHeatmap generates heatmap using Panel X/Y strings
-func (a *Analyzer) queryHeatmap(req AnalysisRequest) ([]HeatmapCell, error) {
-	query := `
-		SELECT 
-			CASE WHEN t.product_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type,
-			i.panel_x,
-			i.panel_y,
-			COUNT(i.panel_id) as total_defects,
-			COUNT(DISTINCT h.product_id) as total_glasses
-		FROM lake_mgr.mas_pnl_prod_eqp_h h
-		JOIN lake_mgr.eas_pnl_ins_def_a i ON h.product_id = i.product_id
-			AND i.process_code = h.process_code
-		LEFT JOIN (SELECT DISTINCT product_id FROM lake_mgr.mas_pnl_prod_eqp_h) t ON h.product_id = t.product_id
-		WHERE h.move_in_ymdhms >= CAST(? AS TIMESTAMP)
-		  AND h.move_in_ymdhms <= CAST(? AS TIMESTAMP)
-		  AND i.panel_x IS NOT NULL AND i.panel_y IS NOT NULL
-	`
-	args := []interface{}{req.StartDate, req.EndDate}
-
-	if len(req.EquipmentIDs) > 0 {
-		query += ` AND h.equipment_line_id IN (`
-		for i, eq := range req.EquipmentIDs {
-			if i > 0 {
-				query += ","
-			}
-			query += "?"
-			args = append(args, eq)
+func (a *Analyzer) queryHeatmap(req AnalysisRequest) ([]database.HeatmapCell, error) {
+	conn, err := a.db.GetAnalyticsDB(req.FacilityCode)
+	if err != nil {
+		return nil, err
+	}
+	// Check for Grid Config (Single Model)
+	var gridConfig config.HeatmapGridConfig
+	useGrid := false
+	if len(req.ModelCodes) == 1 && a.cfg.HeatmapManager != nil {
+		if cfg, ok := a.cfg.HeatmapManager.GetConfig(req.ModelCodes[0]); ok {
+			gridConfig = cfg
+			useGrid = true
 		}
-		query += ")"
 	}
 
-	if req.DefectName != "" {
-		query += ` AND i.defect_name = ?`
-		args = append(args, req.DefectName)
+	var query string
+	var args []interface{}
+
+	if useGrid {
+		// CTE Approach for Fixed Grid
+		query = `
+			WITH x_axis AS (SELECT UNNEST(?::VARCHAR[]) as x),
+			     y_axis AS (SELECT UNNEST(?::VARCHAR[]) as y),
+				 expected_cells AS (
+					SELECT x.x, y.y, 'Target' as group_type FROM x_axis, y_axis
+					UNION ALL
+					SELECT x.x, y.y, 'Others' as group_type FROM x_axis, y_axis
+				 ),
+				 actual_data AS (
+					SELECT 
+						CASE WHEN t.product_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type,
+						i.panel_x,
+						i.panel_y,
+						COUNT(i.panel_id) as total_defects,
+						COUNT(DISTINCT h.product_id) as total_glasses
+					FROM lake_mgr.mas_pnl_prod_eqp_h h
+					JOIN lake_mgr.eas_pnl_ins_def_a i ON h.product_id = i.product_id
+						AND i.process_code = h.process_code
+					LEFT JOIN (SELECT DISTINCT product_id FROM lake_mgr.mas_pnl_prod_eqp_h) t ON h.product_id = t.product_id
+					WHERE h.move_in_ymdhms >= CAST(? AS TIMESTAMP)
+					  AND h.move_in_ymdhms <= CAST(? AS TIMESTAMP)
+					  AND i.panel_x IS NOT NULL AND i.panel_y IS NOT NULL
+		`
+		// Args: XList, YList, StartDate, EndDate
+		args = append(args, gridConfig.XList, gridConfig.YList, req.StartDate, req.EndDate)
+
+		// Filters
+		if len(req.EquipmentIDs) > 0 {
+			query += ` AND h.equipment_line_id IN (`
+			for i, eq := range req.EquipmentIDs {
+				if i > 0 {
+					query += ","
+				}
+				query += "?"
+				args = append(args, eq)
+			}
+			query += ")"
+		}
+		if len(req.ModelCodes) > 0 {
+			query += ` AND h.product_type_code IN (`
+			for i, mc := range req.ModelCodes {
+				if i > 0 {
+					query += ","
+				}
+				query += "?"
+				args = append(args, mc)
+			}
+			query += ")"
+		}
+		if req.DefectName != "" {
+			query += ` AND i.defect_name = ?`
+			args = append(args, req.DefectName)
+		}
+
+		query += ` GROUP BY group_type, i.panel_x, i.panel_y )
+			SELECT 
+				e.group_type,
+				e.x,
+				e.y,
+				COALESCE(a.total_defects, 0) as total_defects,
+				COALESCE(a.total_glasses, 0) as total_glasses
+			FROM expected_cells e
+			LEFT JOIN actual_data a ON e.x = a.panel_x AND e.y = a.panel_y AND e.group_type = a.group_type
+			ORDER BY e.group_type, e.x, e.y
+		`
+
+	} else {
+		// Dynamic Grid Approach (Original)
+		query = `
+			SELECT 
+				CASE WHEN t.product_id IS NOT NULL THEN 'Target' ELSE 'Others' END AS group_type,
+				i.panel_x,
+				i.panel_y,
+				COUNT(i.panel_id) as total_defects,
+				COUNT(DISTINCT h.product_id) as total_glasses
+			FROM lake_mgr.mas_pnl_prod_eqp_h h
+			JOIN lake_mgr.eas_pnl_ins_def_a i ON h.product_id = i.product_id
+				AND i.process_code = h.process_code
+			LEFT JOIN (SELECT DISTINCT product_id FROM lake_mgr.mas_pnl_prod_eqp_h) t ON h.product_id = t.product_id
+			WHERE h.move_in_ymdhms >= CAST(? AS TIMESTAMP)
+			  AND h.move_in_ymdhms <= CAST(? AS TIMESTAMP)
+			  AND i.panel_x IS NOT NULL AND i.panel_y IS NOT NULL
+		`
+		args = append(args, req.StartDate, req.EndDate)
+
+		if len(req.EquipmentIDs) > 0 {
+			query += ` AND h.equipment_line_id IN (`
+			for i, eq := range req.EquipmentIDs {
+				if i > 0 {
+					query += ","
+				}
+				query += "?"
+				args = append(args, eq)
+			}
+			query += ")"
+		}
+
+		if len(req.ModelCodes) > 0 {
+			query += ` AND h.product_type_code IN (`
+			for i, mc := range req.ModelCodes {
+				if i > 0 {
+					query += ","
+				}
+				query += "?"
+				args = append(args, mc)
+			}
+			query += ")"
+		}
+
+		if req.DefectName != "" {
+			query += ` AND i.defect_name = ?`
+			args = append(args, req.DefectName)
+		}
+
+		query += ` GROUP BY group_type, i.panel_x, i.panel_y`
 	}
 
-	query += ` GROUP BY group_type, i.panel_x, i.panel_y`
-
-	rows, err := a.db.Analytics.Query(query, args...)
+	rows, err := conn.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query heatmap: %w", err)
 	}
 	defer rows.Close()
 
-	results := []HeatmapCell{}
+	results := []database.HeatmapCell{}
 	for rows.Next() {
-		var r HeatmapCell
+		var r database.HeatmapCell
 		if err := rows.Scan(&r.GroupType, &r.X, &r.Y, &r.TotalDefects, &r.TotalGlasses); err != nil {
 			return nil, err
 		}
@@ -491,12 +595,14 @@ func (a *Analyzer) queryHeatmap(req AnalysisRequest) ([]HeatmapCell, error) {
 	return results, nil
 }
 
-// ... calculateMetrics ... (unchanged)
-// ... generateCacheKey ... (unchanged)
-
 // AnalyzeBatch performs optimized batch analysis
 func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.AnalysisResults, error) {
 	fmt.Printf("AnalyzeBatch Start: %d targets, Start=%v, End=%v, Defect=%v\n", len(req.Targets), req.StartDate, req.EndDate, req.DefectName)
+
+	conn, err := a.db.GetAnalyticsDB(req.FacilityCode)
+	if err != nil {
+		return nil, err
+	}
 
 	// 1. Fetch ALL Glass Stats for the period (Global Baseline) from lake_mgr
 	query := `
@@ -511,7 +617,7 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 		  AND h.move_in_ymdhms <= CAST(? AS TIMESTAMP)
 		GROUP BY h.product_id, h.lot_id, h.move_in_ymdhms
 	`
-	rows, err := a.db.Analytics.Query(query, req.StartDate, req.EndDate)
+	rows, err := conn.Query(query, req.StartDate, req.EndDate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch global stats: %w", err)
 	}
@@ -532,10 +638,15 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 	fmt.Printf("AnalyzeBatch: Fetched %d global rows from lake_mgr\n", len(allGlassIDs))
 
 	// 2. Apply Defect Filter (if needed)
+	// 2. Apply Defect Filter (if needed)
 	if req.DefectName != "" {
+		conn, err := a.db.GetAnalyticsDB(req.FacilityCode)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get db: %w", err)
+		}
 		// Only keep glasses that have this defect
 		defectQuery := `SELECT DISTINCT product_id FROM lake_mgr.eas_pnl_ins_def_a WHERE defect_name = ?`
-		dRows, err := a.db.Analytics.Query(defectQuery, req.DefectName)
+		dRows, err := conn.Query(defectQuery, req.DefectName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to query defect filter: %w", err)
 		}
@@ -581,7 +692,7 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 		WHERE (equipment_line_id, process_code) IN (%s)
 	`, strings.Join(placeholders, ","))
 
-	hRows, err := a.db.Analytics.Query(hQuery, hArgs...)
+	hRows, err := conn.Query(hQuery, hArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch history: %w", err)
 	}
@@ -621,9 +732,9 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 			targetSet := equipmentGlassMap[t.EquipmentID]
 
 			// Build Result Lists
-			var glassRes []GlassResult
-			var lotResMap = make(map[string]*LotResult)
-			var dailyResMap = make(map[string]*DailyResult)
+			var glassRes []database.GlassResult
+			var lotResMap = make(map[string]*database.LotResult)
+			var dailyResMap = make(map[string]*database.DailyResult)
 
 			var targetDefects, othersDefects, targetCount, othersCount int
 			targetSampleCounter := 0
@@ -651,7 +762,7 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 					targetCount++
 					targetSampleCounter++
 					if targetSampleCounter%targetStride == 0 {
-						glassRes = append(glassRes, GlassResult{
+						glassRes = append(glassRes, database.GlassResult{
 							GlassID: g.GlassID, LotID: g.LotID, WorkDate: g.WorkDate, TotalDefects: g.TotalDefects, GroupType: groupType,
 						})
 					}
@@ -660,7 +771,7 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 					othersCount++
 					othersSampleCounter++
 					if othersSampleCounter%othersStride == 0 {
-						glassRes = append(glassRes, GlassResult{
+						glassRes = append(glassRes, database.GlassResult{
 							GlassID: g.GlassID, LotID: g.LotID, WorkDate: g.WorkDate, TotalDefects: g.TotalDefects, GroupType: groupType,
 						})
 					}
@@ -669,7 +780,7 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 				// Aggregations
 				lotKey := g.LotID + "|" + groupType
 				if _, ok := lotResMap[lotKey]; !ok {
-					lotResMap[lotKey] = &LotResult{LotID: g.LotID, GroupType: groupType}
+					lotResMap[lotKey] = &database.LotResult{LotID: g.LotID, GroupType: groupType}
 				}
 				lotResMap[lotKey].GlassCount++
 				lotResMap[lotKey].TotalDefects += g.TotalDefects
@@ -679,23 +790,35 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 
 				dailyKey := g.WorkDate + "|" + groupType
 				if _, ok := dailyResMap[dailyKey]; !ok {
-					dailyResMap[dailyKey] = &DailyResult{WorkDate: g.WorkDate, GroupType: groupType}
+					dailyResMap[dailyKey] = &database.DailyResult{WorkDate: g.WorkDate, GroupType: groupType}
 				}
 				dailyResMap[dailyKey].GlassCount++
 				dailyResMap[dailyKey].TotalDefects += g.TotalDefects
 			}
 
 			// Finalize Aggregates
-			lotResults := make([]LotResult, 0, len(lotResMap))
+			lotResults := make([]database.LotResult, 0, len(lotResMap))
 			for _, v := range lotResMap {
 				v.AvgDefects = float64(v.TotalDefects) / float64(v.GlassCount)
 				lotResults = append(lotResults, *v)
 			}
-			dailyResults := make([]DailyResult, 0, len(dailyResMap))
+			sort.Slice(lotResults, func(i, j int) bool {
+				return lotResults[i].LotID < lotResults[j].LotID
+			})
+
+			dailyResults := make([]database.DailyResult, 0, len(dailyResMap))
 			for _, v := range dailyResMap {
 				v.AvgDefects = float64(v.TotalDefects) / float64(v.GlassCount)
 				dailyResults = append(dailyResults, *v)
 			}
+			sort.Slice(dailyResults, func(i, j int) bool {
+				return dailyResults[i].WorkDate < dailyResults[j].WorkDate
+			})
+
+			// Sort Glass Results
+			sort.Slice(glassRes, func(i, j int) bool {
+				return glassRes[i].WorkDate < glassRes[j].WorkDate
+			})
 
 			// Heatmap (Query Specific to Target)
 			// Using queryHeatmap logic but specific to this equipment
@@ -708,7 +831,7 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 			})
 			if err != nil {
 				fmt.Printf("Heatmap query failed: %v\n", err)
-				heatmapRes = []HeatmapCell{}
+				heatmapRes = []database.HeatmapCell{}
 			}
 
 			// Metrics
@@ -725,7 +848,7 @@ func (a *Analyzer) AnalyzeBatch(req BatchAnalysisRequest) (map[string]*database.
 				othersRate = float64(othersDefects) / float64(othersCount)
 			}
 
-			metrics := AnalysisMetrics{
+			metrics := database.AnalysisMetrics{
 				OverallDefectRate:    overallRate,
 				TargetDefectRate:     targetRate,
 				OthersDefectRate:     othersRate,
@@ -780,8 +903,8 @@ func (c *CellsAggregator) Add(panelMap []int64) {
 		}
 	}
 }
-func (c *CellsAggregator) ToCells(groupType string) []HeatmapCell {
-	cells := []HeatmapCell{}
+func (c *CellsAggregator) ToCells(groupType string) []database.HeatmapCell {
+	cells := []database.HeatmapCell{}
 	if c.TotalGlasses == 0 {
 		return cells
 	}
@@ -790,7 +913,7 @@ func (c *CellsAggregator) ToCells(groupType string) []HeatmapCell {
 		x := string(rune('A' + (i / 10)))
 		y := strconv.Itoa(i % 10)
 		rate := float64(defects) / float64(c.TotalGlasses)
-		cells = append(cells, HeatmapCell{
+		cells = append(cells, database.HeatmapCell{
 			GroupType:    groupType,
 			X:            x,
 			Y:            y,
@@ -817,7 +940,7 @@ func parsePanelMap(s string) []int64 {
 	return res
 }
 
-func (a *Analyzer) calculateBatchMetrics(glassResults []GlassResult) AnalysisMetrics {
+func (a *Analyzer) calculateBatchMetrics(glassResults []database.GlassResult) database.AnalysisMetrics {
 	// Reuse logic from calculateMetrics but avoid method call overhead if simpler
 	return a.calculateMetrics(glassResults)
 }
@@ -902,7 +1025,7 @@ func buildProcessFilter(codes []string) (string, []interface{}) {
 }
 
 // calculateMetrics computes summary statistics
-func (a *Analyzer) calculateMetrics(glassResults []GlassResult) AnalysisMetrics {
+func (a *Analyzer) calculateMetrics(glassResults []database.GlassResult) database.AnalysisMetrics {
 	var targetDefects, othersDefects, targetCount, othersCount int
 
 	for _, r := range glassResults {
@@ -932,7 +1055,7 @@ func (a *Analyzer) calculateMetrics(glassResults []GlassResult) AnalysisMetrics 
 	delta := overallRate - targetRate
 	superiority := othersRate - targetRate // Positive if target is better
 
-	return AnalysisMetrics{
+	return database.AnalysisMetrics{
 		OverallDefectRate:    overallRate,
 		TargetDefectRate:     targetRate,
 		OthersDefectRate:     othersRate,

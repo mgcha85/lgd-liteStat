@@ -179,18 +179,28 @@ func RunMockGeneration(repo *database.Repository, cfg *config.Config) error {
 	// It does: startDate := time.Now().AddDate(0, 0, -m.config.TimeRangeDays)
 	// System time is 2026-01-16. So -400 days covers late 2024 to early 2026. This is perfect.
 
-	// 1. History
-	historyData := generator.GenerateHistoryData()
-	fmt.Printf("Generated %d history records\n", len(historyData))
-	if err := repo.BulkInsertHistory(historyData); err != nil {
-		return fmt.Errorf("failed to insert history: %w", err)
+	// Determine target facilities
+	facilities := cfg.Settings.Facilities
+	if len(facilities) == 0 {
+		facilities = []string{"default"}
 	}
 
-	// 2. Inspection
-	inspectionData := generator.GenerateInspectionData()
-	fmt.Printf("Generated %d inspection records\n", len(inspectionData))
-	if err := repo.BulkInsertInspection(inspectionData); err != nil {
-		return fmt.Errorf("failed to insert inspection: %w", err)
+	for _, fac := range facilities {
+		fmt.Printf("Generating mock data for facility: %s\n", fac)
+
+		// 1. History
+		historyData := generator.GenerateHistoryData()
+		fmt.Printf("  - Generated %d history records\n", len(historyData))
+		if err := repo.BulkInsertHistory(historyData, fac); err != nil {
+			return fmt.Errorf("failed to insert history for %s: %w", fac, err)
+		}
+
+		// 2. Inspection
+		inspectionData := generator.GenerateInspectionData()
+		fmt.Printf("  - Generated %d inspection records\n", len(inspectionData))
+		if err := repo.BulkInsertInspection(inspectionData, fac); err != nil {
+			return fmt.Errorf("failed to insert inspection for %s: %w", fac, err)
+		}
 	}
 
 	fmt.Println("Mock data generation complete!")

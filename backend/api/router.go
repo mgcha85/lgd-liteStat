@@ -27,7 +27,10 @@ func SetupRouter(h *Handler) *mux.Router {
 
 	// Config Management
 	r.HandleFunc("/api/config", h.GetConfig).Methods("GET")
+	r.HandleFunc("/api/config", h.GetConfig).Methods("GET")
 	r.HandleFunc("/api/config", h.UpdateConfig).Methods("PUT")
+	r.HandleFunc("/api/config/heatmap", h.GetHeatmapConfig).Methods("GET")
+	r.HandleFunc("/api/config/heatmap", h.UpdateHeatmapConfig).Methods("PUT")
 
 	// Analysis endpoints
 	// Create a subrouter for /api/analyze paths
@@ -39,6 +42,8 @@ func SetupRouter(h *Handler) *mux.Router {
 	analyzeRouter.HandleFunc("/glass/{glassId}", h.AnalyzeGlass).Methods("GET")
 	analyzeRouter.HandleFunc("/{jobId}/status", h.GetAnalysisStatus).Methods("GET")
 	analyzeRouter.HandleFunc("/{jobId}/results", h.GetAnalysisResults).Methods("GET")
+	analyzeRouter.HandleFunc("/{jobId}/export", h.ExportAnalysis).Methods("GET") // CSV Export
+	analyzeRouter.HandleFunc("/{jobId}/images", h.ExportImages).Methods("GET")   // Image Export
 
 	// Equipment rankings (for frontend dashboard)
 	r.HandleFunc("/api/equipment/rankings", h.GetEquipmentRankings).Methods("GET")

@@ -279,8 +279,7 @@
     <div class="card-body p-4">
         <!-- Header -->
         <h3 class="font-bold text-lg flex items-center gap-2">
-            {equipment.equipment_id}
-            <span class="badge badge-neutral">{equipment.process_code}</span>
+            {equipment.process_code} - {equipment.equipment_id}
         </h3>
 
         <!-- Content -->

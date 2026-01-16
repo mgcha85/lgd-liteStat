@@ -475,6 +475,10 @@ JOB_ID="550e8400-e29b-41d4-a716-446655440000"
 curl "http://localhost:8080/api/analyze/${JOB_ID}/results"
 ```
 
+---
+
+
+
 **With pagination:**
 ```bash
 curl "http://localhost:8080/api/analyze/${JOB_ID}/results?limit=100&offset=0"
@@ -575,7 +579,34 @@ curl -s "http://localhost:8080/api/analyze/${JOB_ID}/results?limit=10" | jq .
 
 ---
 
-### 4.4 Get Equipment Rankings
+### 4.4 Export Analysis Images [New]
+
+Export generated chart images (Daily Trend, Heatmap) for a specific equipment in an analysis job. Returns a ZIP file.
+
+#### Endpoint
+```
+GET /api/analyze/{jobId}/images
+```
+
+#### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| equipment_id | string | **Yes** | Equipment ID to generate charts for |
+
+#### Request Example
+
+```bash
+curl -o charts.zip "http://localhost:8080/api/analyze/${JOB_ID}/images?equipment_id=EQ001"
+```
+
+#### Response (200 OK)
+- **Content-Type**: `application/zip`
+- **Body**: ZIP file containing `daily_trend.png`, `heatmap.svg`, etc.
+
+---
+
+### 4.5 Get Equipment Rankings
 
 Get top equipments ranked by defect rate delta (overall rate - equipment rate). Higher delta means equipment causes fewer defects than average.
 

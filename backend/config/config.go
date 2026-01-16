@@ -56,11 +56,15 @@ type Config struct {
 
 	// Mock data settings
 	MockData MockDataConfig `mapstructure:"mock_data"`
+
+	// Heatmap Config Manager
+	HeatmapManager *HeatmapConfigManager
 }
 
 // SettingsConfig holds UI-controllable settings
 type SettingsConfig struct {
 	DefectTerms []string `mapstructure:"defect_terms"`
+	Facilities  []string `mapstructure:"facilities"`
 }
 
 // QueryConfig holds SQL query templates
@@ -144,6 +148,12 @@ func LoadConfig() (*Config, error) {
 
 	if err := viper.UnmarshalKey("mock_data", &config.MockData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal mock_data config: %w", err)
+	}
+
+	// Initialize Heatmap Config Manager
+	config.HeatmapManager = NewHeatmapConfigManager("config_heatmap.json") // Save in root
+	if err := config.HeatmapManager.Load(); err != nil {
+		fmt.Printf("Warning: Failed to load heatmap config: %v\n", err)
 	}
 
 	// Validate required fields
