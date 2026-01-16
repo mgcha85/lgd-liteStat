@@ -639,11 +639,11 @@
 {#if showGridModal}
     <div class="modal modal-open">
         <div class="modal-box">
-            <h3 class="font-bold text-lg mb-4">Heatmap Grid Settings</h3>
+            <h3 class="font-bold text-lg mb-4">Heatmap 라벨 설정</h3>
 
             <div class="form-control w-full mb-4">
                 <label class="label">
-                    <span class="label-text">Select Model</span>
+                    <span class="label-text">모델 선택</span>
                 </label>
                 <select
                     bind:value={activeGridModel}
@@ -661,48 +661,44 @@
                 <input
                     type="text"
                     bind:value={newModelName}
-                    placeholder="New Model Name"
+                    placeholder="새 모델명 입력"
                     class="input input-bordered flex-grow"
                 />
                 <button class="btn btn-outline" on:click={addNewModel}
-                    >Add</button
+                    >추가</button
                 >
             </div>
 
             <div class="form-control mb-2">
                 <label class="label">
-                    <span class="label-text"
-                        >X-Axis Labels (comma separated)</span
-                    >
+                    <span class="label-text">X축 라벨 (쉼표로 구분)</span>
                 </label>
                 <input
                     type="text"
                     bind:value={gridXInput}
                     class="input input-bordered"
-                    placeholder="e.g. 1,2,3,4"
+                    placeholder="예: 1,2,3,4"
                 />
             </div>
 
             <div class="form-control mb-4">
                 <label class="label">
-                    <span class="label-text"
-                        >Y-Axis Labels (comma separated)</span
-                    >
+                    <span class="label-text">Y축 라벨 (쉼표로 구분)</span>
                 </label>
                 <input
                     type="text"
                     bind:value={gridYInput}
                     class="input input-bordered"
-                    placeholder="e.g. A,B,C,D"
+                    placeholder="예: A,B,C,D"
                 />
             </div>
 
             <div class="modal-action">
                 <button class="btn btn-primary" on:click={saveGridSettings}
-                    >Save</button
+                    >저장</button
                 >
                 <button class="btn" on:click={() => (showGridModal = false)}
-                    >Close</button
+                    >닫기</button
                 >
             </div>
         </div>
@@ -713,19 +709,12 @@
     <!-- Header with Theme Toggle -->
     <div class="navbar bg-base-100 mb-6 rounded-box shadow-md">
         <div class="flex-1">
-            <h1 class="text-2xl font-bold px-4">
-                Display Manufacturing Analysis
-            </h1>
+            <h1 class="text-2xl font-bold px-4">뚜냔 AI 프로젝트</h1>
         </div>
         <div class="flex-none gap-2">
             <!-- Theme Toggle: Unchecked=Black(Dark), Checked=Corporate(Light) -->
             <label class="swap swap-rotate btn btn-ghost btn-circle">
-                <input
-                    type="checkbox"
-                    class="theme-controller"
-                    value="corporate"
-                    checked
-                />
+                <input type="checkbox" class="theme-controller" value="black" />
 
                 <!-- Sun Icon (Visible when Light/Checked) -->
                 <svg
@@ -1185,7 +1174,7 @@
     <!-- Grid Settings Modal -->
     <dialog class="modal" class:modal-open={showGridModal}>
         <div class="modal-box w-11/12 max-w-3xl">
-            <h3 class="font-bold text-lg">패널주소 설정</h3>
+            <h3 class="font-bold text-lg">Heatmap 라벨 설정</h3>
             <p class="py-4 text-sm text-gray-500">
                 모델별 히트맵 Grid (X/Y축 순서)를 설정합니다. 설정된 순서대로
                 히트맵이 고정되어 출력됩니다.
@@ -1233,12 +1222,12 @@
             {#if activeGridModel}
                 <div class="card bg-base-200 p-4">
                     <span class="font-bold mb-2 block text-primary"
-                        >{activeGridModel} 설정</span
+                        >{activeGridModel} Heatmap 라벨 설정</span
                     >
                     <div class="form-control">
                         <div class="label">
                             <span class="label-text"
-                                >X Axis (Comma separated, e.g. A,B,C)</span
+                                >X축 라벨 (쉼표로 구분, 예: A,B,C)</span
                             >
                         </div>
                         <input
@@ -1251,7 +1240,7 @@
                     <div class="form-control mt-4">
                         <div class="label">
                             <span class="label-text"
-                                >Y Axis (Comma separated, e.g. 1,2,3)</span
+                                >Y축 라벨 (쉼표로 구분, 예: 1,2,3)</span
                             >
                         </div>
                         <input

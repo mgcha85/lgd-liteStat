@@ -8,6 +8,8 @@
 http://localhost:8080
 ```
 
+> **참고**: 프로덕션 환경에서 프론트엔드는 `http://localhost:8081`에서 접속하며, Nginx가 API 요청을 백엔드(8080)로 프록시합니다.
+
 ## 공장 선택 (Facility Selection)
 
 모든 데이터 조회 및 분석 API는 특정 공장 데이터베이스(`data/{facility}/duck.db`)를 대상으로 하기 위해 공장 선택을 지원합니다.

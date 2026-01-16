@@ -19,9 +19,19 @@
     loading.set(true);
     try {
       const c = await getConfig();
+      console.log("[App] Loaded Config:", c);
+
+      // Map and ensure defaults with correct backend field names (BigCaps)
       if (!c.Settings) c.Settings = { DefectTerms: [] };
-      if (!c.Analysis)
-        c.Analysis = { TopNLimit: 10, DefaultPageSize: 20, MaxPageSize: 100 };
+      if (!c.Analysis) {
+        c.Analysis = { TopNLimit: 20, DefaultPageSize: 20, MaxPageSize: 100 };
+      } else {
+        // Ensure individual fields have defaults if Analysis exists but fields are missing
+        c.Analysis.TopNLimit = c.Analysis.TopNLimit || 20;
+        c.Analysis.DefaultPageSize = c.Analysis.DefaultPageSize || 20;
+        c.Analysis.MaxPageSize = c.Analysis.MaxPageSize || 100;
+      }
+
       config.set(c);
     } catch (e) {
       error.set("설정 로드 실패: " + e.message);

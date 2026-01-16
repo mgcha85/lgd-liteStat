@@ -415,11 +415,11 @@ func (r *Repository) GetEquipmentRankings(start, end time.Time, defectName strin
 	if err != nil {
 		return nil, 0, err
 	}
-	// Build date filter
+	// Build date filter (without alias as it's used inside CTE)
 	dateFilter := ""
 	dateParams := []interface{}{}
 	if !start.IsZero() && !end.IsZero() {
-		dateFilter = "AND h.move_in_ymdhms BETWEEN ? AND ?"
+		dateFilter = "AND move_in_ymdhms BETWEEN ? AND ?"
 		dateParams = append(dateParams, start, end)
 	}
 
@@ -435,10 +435,10 @@ func (r *Repository) GetEquipmentRankings(start, end time.Time, defectName strin
 		limitClause = fmt.Sprintf("LIMIT %d", limit)
 	}
 
-	// Correct Param Order: Defect (JOIN) -> Date (WHERE) -> MinCount (HAVING)
+	// Correct Param Order: Date (CTE 1st) -> Defect (JOIN 2nd) -> MinCount (HAVING)
 	params := []interface{}{}
-	params = append(params, defectParams...)
 	params = append(params, dateParams...)
+	params = append(params, defectParams...)
 
 	// Calculate usage of product_id instead of glass_id
 	// Formula: Delta = Others_Avg - Overall_Avg

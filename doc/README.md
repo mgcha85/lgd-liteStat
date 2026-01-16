@@ -15,6 +15,11 @@
   - **히트맵 (Heatmaps)**: 글라스 패널상의 공간적 불량 분포를 시각화합니다.
   - **일별 추이 (Daily Trends)**: 수율 변화를 시계열로 확인합니다.
 
+### 🌏 UI/UX
+- **전체 한글화**: 대시보드, 설정, 모달 등 모든 UI가 한글로 제공됩니다.
+- **IBM Carbon Design**: 설정 페이지에 IBM Carbon Design System 스타일이 적용되어 깔끔하고 모던한 UI를 제공합니다.
+- **다크/라이트 모드**: 테마 전환을 지원합니다.
+
 ### ⚡ 성능 및 아키텍처
 - **인메모리 속도**: `glass_stats` 데이터 마트와 DuckDB의 컬럼 기반 엔진 덕분에 쿼리가 **50ms 미만**에 실행됩니다.
 - **대규모 확장성**: 단일 노드에서 수백만 건의 검사 기록을 처리할 수 있습니다.
@@ -59,6 +64,10 @@ podman-compose -f docker-compose.prod.yml up -d --build
 ```
 - **Backend**: Multi-stage Docker build를 통해 200MB 이하의 경량 이미지로 실행됩니다.
 - **Frontend**: Nginx를 통해 정적 파일을 서빙하며 Gzip 압축이 적용됩니다.
+
+#### 포트 정보
+- **8080**: Backend API (컨테이너 내부)
+- **8081**: Frontend (Nginx 리버스 프록시, 브라우저에서 접속)
 
 ### 공장(Facilities) 설정
 `config.yaml`을 수정하여 공장을 정의합니다:
@@ -112,7 +121,13 @@ A: 백엔드 시작 시 마트 갱신(Refresh)이 완료되었는지 확인하�
 또한 `config.yaml`에서 mock data의 `enabled: true` 설정이 되어 있는지 확인하세요.
 
 **Q: 버튼이 "Lookup"으로 보이지만 "분석"을 원합니다.**
-A: 최신 UI 업데이트에서 텍스트를 "분석"으로 변경했습니다. 브라우저 캐시를 지워보세요.
+A: 최신 UI 업데이트에서 모든 텍스트가 한글로 변경되었습니다. 브라우저 캐시를 지워보세요 (Ctrl+Shift+R).
+
+**Q: 설정이 저장되지 않습니다.**
+A: 설정 페이지에서 "저장" 버튼을 클릭 후 성공 메시지를 확인하세요. `config.yaml` 파일에 변경 사항이 반영됩니다.
+
+**Q: "Failed to fetch rankings" 에러가 발생합니다.**
+A: 선택한 날짜 범위에 데이터가 없거나, 백엔드 SQL 쿼리 오류일 수 있습니다. 백엔드 로그를 확인하세요: `podman logs litestat-backend`.
 
 ---
 

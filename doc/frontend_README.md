@@ -1,43 +1,98 @@
-# Svelte + Vite
+# LGD liteStat 프론트엔드
 
-This template should help get you started developing with Svelte in Vite.
+Svelte 5 + Vite 기반의 모던 웹 애플리케이션입니다.
 
-## Recommended IDE Setup
+## 🛠️ 기술 스택
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
+| 기술 | 버전 | 용도 |
+|-----|------|------|
+| **Svelte** | 5.x | 리액티브 UI 프레임워크 |
+| **Vite** | 7.x | 빌드 도구 및 개발 서버 |
+| **DaisyUI** | 4.x | Tailwind 기반 컴포넌트 라이브러리 |
+| **Plotly.js** | - | 차트 및 히트맵 시각화 |
 
-## Need an official Svelte framework?
+---
 
-Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
+## 📁 프로젝트 구조
 
-## Technical considerations
-
-**Why use this over SvelteKit?**
-
-- It brings its own routing solution which might not be preferable for some users.
-- It is first and foremost a framework that just happens to use Vite under the hood, not a Vite app.
-
-This template contains as little as possible to get started with Vite + Svelte, while taking into account the developer experience with regards to HMR and intellisense. It demonstrates capabilities on par with the other `create-vite` templates and is a good starting point for beginners dipping their toes into a Vite + Svelte project.
-
-Should you later need the extended capabilities and extensibility provided by SvelteKit, the template has been structured similarly to SvelteKit so that it is easy to migrate.
-
-**Why include `.vscode/extensions.json`?**
-
-Other templates indirectly recommend extensions via the README, but this file allows VS Code to prompt the user to install the recommended extension upon opening the project.
-
-**Why enable `checkJs` in the JS template?**
-
-It is likely that most cases of changing variable types in runtime are likely to be accidental, rather than deliberate. This provides advanced typechecking out of the box. Should you like to take advantage of the dynamically-typed nature of JavaScript, it is trivial to change the configuration.
-
-**Why is HMR not preserving my local component state?**
-
-HMR state preservation comes with a number of gotchas! It has been disabled by default in both `svelte-hmr` and `@sveltejs/vite-plugin-svelte` due to its often surprising behavior. You can read the details [here](https://github.com/sveltejs/svelte-hmr/tree/master/packages/svelte-hmr#preservation-of-local-state).
-
-If you have state that's important to retain within a component, consider creating an external store which would not be replaced by HMR.
-
-```js
-// store.js
-// An extremely simple external store
-import { writable } from 'svelte/store'
-export default writable(0)
 ```
+frontend/
+├── src/
+│   ├── lib/
+│   │   ├── Dashboard.svelte    # 메인 대시보드 컴포넌트
+│   │   ├── Settings.svelte     # 설정 페이지 (IBM Carbon 스타일)
+│   │   ├── api.js              # API 호출 유틸리티
+│   │   └── store.js            # Svelte Store (전역 상태)
+│   ├── App.svelte              # 라우팅 및 레이아웃
+│   └── main.js                 # 진입점
+├── index.html
+├── vite.config.js
+└── package.json
+```
+
+---
+
+## 🚀 로컬 개발
+
+```bash
+# 의존성 설치
+npm install
+
+# 개발 서버 실행 (HMR 지원)
+npm run dev
+```
+
+개발 서버는 기본적으로 `http://localhost:5173`에서 실행됩니다.
+
+---
+
+## 🏗️ 프로덕션 빌드
+
+```bash
+# 정적 파일 빌드
+npm run build
+```
+
+빌드된 파일은 `dist/` 폴더에 생성됩니다. 프로덕션 배포 시 Docker/Podman을 통해 Nginx 컨테이너로 서빙됩니다.
+
+---
+
+## 🌏 UI 특징
+
+### 한글화
+- 모든 UI 텍스트가 한글로 제공됩니다.
+- 탭: 📊 대시보드, ⚙️ 설정
+- 버튼, 라벨, 알림 메시지 등 전체 한글화 완료
+
+### IBM Carbon Design (설정 페이지)
+- 하단 테두리(Bottom Border) 스타일의 인풋 필드
+- 태그 형식의 불량 용어 표시
+- 인라인 알림 스타일의 저장 결과 메시지
+
+### 테마
+- 다크/라이트 모드 지원
+- DaisyUI 테마 컨트롤러 사용
+
+---
+
+## 🔧 주요 컴포넌트
+
+### Dashboard.svelte
+- 공장(Facility) 선택
+- 날짜 범위 선택 (기본: 최근 7일)
+- 불량 유형 필터
+- 장비 랭킹 테이블 (Best/Worst 10)
+- 산점도, 히트맵, 일별 추이 차트
+
+### Settings.svelte
+- 분석 설정 (Top N 제한, 기본 불량 유형)
+- 데이터 보존 기간
+- 스케줄러 설정
+
+---
+
+## 📝 IDE 설정
+
+권장 IDE: [VS Code](https://code.visualstudio.com/) + [Svelte 확장](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode)
+
+`checkJs` 옵션이 활성화되어 있어 JavaScript에서도 타입 체크를 지원합니다.

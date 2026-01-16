@@ -568,17 +568,10 @@ type ConfigUpdateRequest struct {
 	} `json:"settings"`
 }
 
-// GetConfig returns the current configuration
-// GetConfig returns public configuration
+// GetConfig returns the full configuration
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
-	publicConfig := struct {
-		Settings config.SettingsConfig `json:"Settings"`
-		MockData config.MockDataConfig `json:"MockData"`
-	}{
-		Settings: h.cfg.Settings,
-		MockData: h.cfg.MockData,
-	}
-	respondJSON(w, http.StatusOK, publicConfig)
+	// Return the whole config object so frontend can access Analysis, Retention, etc.
+	respondJSON(w, http.StatusOK, h.cfg)
 }
 
 // UpdateConfig updates configuration settings
