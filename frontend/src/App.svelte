@@ -4,6 +4,7 @@
   import { getConfig } from "./lib/api.js";
   import Dashboard from "./lib/Dashboard.svelte";
   import Settings from "./lib/Settings.svelte";
+  import { theme } from "./lib/store.js"; // Import to initialize subscription
 
   const activeTab = writable("dashboard");
   const config = writable(null);

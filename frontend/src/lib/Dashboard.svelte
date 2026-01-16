@@ -18,6 +18,7 @@
         getExportUrl,
     } from "./api.js";
     import AnalysisCard from "./AnalysisCard.svelte";
+    import { theme } from "./store.js";
 
     import Plotly from "plotly.js-dist-min";
 
@@ -30,6 +31,7 @@
     // Initialization
     $: if (config?.Settings?.Facilities) {
         facilities = config.Settings.Facilities;
+
         // Set default if not set
         if (!selectedFacility && facilities.length > 0) {
             selectedFacility = facilities[0];
@@ -713,9 +715,16 @@
         </div>
         <div class="flex-none gap-2">
             <!-- Theme Toggle: Unchecked=Black(Dark), Checked=Corporate(Light) -->
-            <label class="swap swap-rotate btn btn-ghost btn-circle">
-                <input type="checkbox" class="theme-controller" value="black" />
-
+            <label class="swap swap-rotate text-primary">
+                <!-- this hidden checkbox controls the state -->
+                <input
+                    type="checkbox"
+                    class="theme-controller"
+                    value="lgd-dark"
+                    checked={$theme === "lgd-dark"}
+                    on:change={(e) =>
+                        theme.set(e.target.checked ? "lgd-dark" : "corporate")}
+                />
                 <!-- Sun Icon (Visible when Light/Checked) -->
                 <svg
                     class="swap-on fill-current w-6 h-6"
@@ -1269,3 +1278,22 @@
         </form>
     </dialog>
 </div>
+
+<style>
+    /* Theme Transition & Card Styles */
+    :global(html) {
+        transition:
+            background-color 0.3s ease,
+            color 0.3s ease;
+    }
+    :global(.card) {
+        border: 1px solid transparent;
+        transition: all 0.3s ease;
+    }
+    :global([data-theme="lgd-dark"] .card) {
+        border-color: #334155; /* Slate 700 */
+        box-shadow:
+            0 4px 6px -1px rgba(0, 0, 0, 0.5),
+            0 2px 4px -1px rgba(0, 0, 0, 0.3);
+    }
+</style>
