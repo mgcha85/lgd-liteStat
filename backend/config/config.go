@@ -145,7 +145,7 @@ func LoadConfig() (*Config, error) {
 		SourceDBPassword:      getEnv("SOURCE_DB_PASSWORD", ""),
 		SourceInspectionTable: getEnv("SOURCE_INSPECTION_TABLE", "inspection_log"),
 		SourceHistoryTable:    getEnv("SOURCE_HISTORY_TABLE", "process_history"),
-		APIPort:               getEnv("API_PORT", "8080"),
+		APIPort:               getEnv("API_PORT", "8082"),
 		APIHost:               getEnv("API_HOST", "0.0.0.0"),
 		LogLevel:              getEnv("LOG_LEVEL", "info"),
 		DataRetentionDays:     getEnvAsInt("DATA_RETENTION_DAYS", 365),
