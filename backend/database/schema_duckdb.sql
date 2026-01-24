@@ -5,6 +5,8 @@ CREATE SCHEMA IF NOT EXISTS lake_mgr;
 DROP TABLE IF EXISTS lake_mgr.eas_pnl_ins_def_a;
 DROP TABLE IF EXISTS lake_mgr.mas_pnl_prod_eqp_h;
 DROP TABLE IF EXISTS glass_stats;
+DROP VIEW IF EXISTS inspection;
+DROP VIEW IF EXISTS history;
 
 -- Inspection Table
 CREATE TABLE IF NOT EXISTS lake_mgr.eas_pnl_ins_def_a (
@@ -76,3 +78,7 @@ CREATE TABLE IF NOT EXISTS glass_stats (
     total_defects INTEGER,
     created_at TIMESTAMP
 );
+
+-- Views for Backward Compatibility & Easier Querying
+CREATE VIEW inspection AS SELECT * FROM lake_mgr.eas_pnl_ins_def_a;
+CREATE VIEW history AS SELECT * FROM lake_mgr.mas_pnl_prod_eqp_h;
