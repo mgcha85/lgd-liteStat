@@ -6,10 +6,15 @@
 echo "Loading images..."
 docker load -i backend.tar
 docker load -i frontend.tar
-# Load Dev images if present
 if [ -f "dev-images.tar" ]; then
     echo "Loading Dev images..."
     docker load -i dev-images.tar
+fi
+
+# Load Python Scheduler if present separately
+if [ -f "python-scheduler.tar" ]; then
+    echo "Loading Python Scheduler image..."
+    docker load -i python-scheduler.tar
 fi
 
 echo "Starting services..."

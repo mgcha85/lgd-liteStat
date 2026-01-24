@@ -37,6 +37,16 @@ services:
     depends_on:
       - litestat-backend-dev
 
+  # Python Scheduler (Data Downloader)
+  python-scheduler:
+    container_name: litestat-scheduler
+    image: lgd-litestat-python:dev
+    volumes:
+      - ./python-scheduler:/app
+      - ./data:/app/data # Share data with backend
+      - ./python-scheduler/.env:/app/.env
+    restart: always
+
 networks:
   default:
     driver: bridge

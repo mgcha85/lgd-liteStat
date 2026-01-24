@@ -50,6 +50,26 @@ docker-compose -f docker-compose.prod.yml up -d
     ./offline-load.sh  # 대상 서버에서 로드 및 실행
     ```
 
+### 1.4 Python 스케줄러 (Data Downloader)
+데이터 수집을 위한 별도의 Python 컨테이너가 추가되었습니다.
+
+1.  **구성 요소**: Python 3.13, Pandas, DuckDB, Schedule
+2.  **설정 방법**:
+    `python-scheduler/.env` 파일을 생성하여 DB 접속 정보를 설정하세요.
+    ```bash
+    cp python-scheduler/.env.example python-scheduler/.env
+    vi python-scheduler/.env
+    ```
+3.  **실행**: `docker-compose.dev.yml`에 포함되어 자동으로 실행됩니다.
+    *   개별 실행: `docker-compose -f docker-compose.dev.yml up -d python-scheduler`
+
+> **Tip: Python 스케줄러만 업데이트하기**
+>
+> 전체 이미지를 다시 옮길 필요 없이 Python 이미지만 따로 생성하여 이동할 수 있습니다.
+> 1. (온라인) `./offline-save.sh python` 실행 -> `python-scheduler.tar` 생성.
+> 2. (오프라인) 파일 복사 후 `./offline-load.sh` 실행.
+> 3. (오프라인) `docker-compose -f docker-compose.dev.yml up -d --no-deps python-scheduler` 로 재시작.
+
 ---
 
 ## 2. API 리스트

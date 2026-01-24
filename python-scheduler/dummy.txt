@@ -1,0 +1,6 @@
+# Add requirements
+pandas
+duckdb
+schedule
+psycopg2-binary
+python-dotenv
