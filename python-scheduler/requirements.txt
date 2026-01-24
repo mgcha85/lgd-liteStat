@@ -1,5 +1,7 @@
 pandas
 duckdb
 schedule
-psycopg2-binary
 python-dotenv
+boto3
+pyarrow
+pyyaml

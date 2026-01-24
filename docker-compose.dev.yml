@@ -45,6 +45,7 @@ services:
       - ./python-scheduler:/app
       - ./data:/app/data # Share data with backend
       - ./python-scheduler/.env:/app/.env
+      - ./backend/config.yaml:/app/config.yaml # Shared Config
     restart: always
 
 networks:

@@ -14,7 +14,25 @@ if [ "$MODE" == "python" ]; then
     
     # 2. Build
     echo "Building Python Scheduler Image..."
-    podman build -f ./python-scheduler/Dockerfile -t lgd-litestat-python:dev ./python-scheduler
+    
+    # Load .env variables for PIP config if present
+    PIP_ARGS=""
+    if [ -f "./python-scheduler/.env" ]; then
+        echo "Loading build config from ./python-scheduler/.env"
+        # Export variables temporarily
+        export $(grep -v '^#' ./python-scheduler/.env | xargs)
+        
+        if [ -n "$PIP_INDEX_URL" ]; then
+            PIP_ARGS="$PIP_ARGS --build-arg PIP_INDEX_URL=$PIP_INDEX_URL"
+            echo "Detected PIP_INDEX_URL"
+        fi
+        if [ -n "$PIP_TRUSTED_HOST" ]; then
+            PIP_ARGS="$PIP_ARGS --build-arg PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST"
+            echo "Detected PIP_TRUSTED_HOST"
+        fi
+    fi
+    
+    podman build -f ./python-scheduler/Dockerfile $PIP_ARGS -t lgd-litestat-python:dev ./python-scheduler
     
     # 3. Save
     echo "Saving Python Scheduler Image..."
@@ -49,8 +67,14 @@ podman save --format docker-archive -o frontend.tar lgd-litestat-frontend:prod
 echo "Building Dev Images..."
 podman build -f ./backend/Dockerfile.dev -t lgd-litestat-backend:dev ./backend
 podman build -f ./frontend/Dockerfile.dev -t lgd-litestat-frontend:dev ./frontend
-# Build Python Scheduler Image (Pass PIP args if needed, e.g. --build-arg PIP_INDEX_URL=...)
-podman build -f ./python-scheduler/Dockerfile -t lgd-litestat-python:dev ./python-scheduler
+# Build Python Scheduler Image (Pass PIP args if needed)
+PIP_ARGS=""
+if [ -f "./python-scheduler/.env" ]; then
+    export $(grep -v '^#' ./python-scheduler/.env | xargs)
+    if [ -n "$PIP_INDEX_URL" ]; then PIP_ARGS="$PIP_ARGS --build-arg PIP_INDEX_URL=$PIP_INDEX_URL"; fi
+    if [ -n "$PIP_TRUSTED_HOST" ]; then PIP_ARGS="$PIP_ARGS --build-arg PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST"; fi
+fi
+podman build -f ./python-scheduler/Dockerfile $PIP_ARGS -t lgd-litestat-python:dev ./python-scheduler
 
 echo "Saving Dev Images..."
 podman save --format docker-archive -o dev-images.tar lgd-litestat-backend:dev lgd-litestat-frontend:dev lgd-litestat-python:dev
