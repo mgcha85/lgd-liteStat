@@ -86,8 +86,9 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 // IngestRequest defines the body for ingestion API
 type IngestRequest struct {
-	StartDate string `json:"start_date"`
-	EndDate   string `json:"end_date"`
+	StartDate string   `json:"start_date"`
+	EndDate   string   `json:"end_date"`
+	Targets   []string `json:"targets"` // ["history", "inspection"]
 }
 
 // IngestData triggers data ingestion
@@ -110,7 +111,7 @@ func (h *Handler) IngestData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pass nil for facilities to use all configured facilities
-	counts, err := h.ingestor.IngestData(startTime, endTime, nil)
+	counts, err := h.ingestor.IngestData(startTime, endTime, nil, req.Targets)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, fmt.Sprintf("ingest failed: %v", err))
 		return

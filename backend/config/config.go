@@ -65,6 +65,9 @@ type Config struct {
 
 	// Retention
 	Retention RetentionConfig `mapstructure:"retention"`
+
+	// Ingestion Settings (Source Table/Columns)
+	Ingest IngestConfig `mapstructure:"ingest"`
 }
 
 // RetentionConfig holds data retention settings
@@ -103,6 +106,14 @@ type MockDataConfig struct {
 	Processes         []string `mapstructure:"processes"`
 	Equipments        []string `mapstructure:"equipments"`
 	DefectTerms       []string `mapstructure:"defect_terms"`
+}
+
+// IngestConfig holds source system table and column mappings
+type IngestConfig struct {
+	HistoryTable      string   `mapstructure:"history_table"`
+	HistoryColumns    []string `mapstructure:"history_columns"`
+	InspectionTable   string   `mapstructure:"inspection_table"`
+	InspectionColumns []string `mapstructure:"inspection_columns"`
 }
 
 // LoadConfig loads configuration from .env and config.yaml
@@ -161,6 +172,10 @@ func LoadConfig() (*Config, error) {
 
 	if err := viper.UnmarshalKey("mock_data", &config.MockData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal mock_data config: %w", err)
+	}
+
+	if err := viper.UnmarshalKey("ingest", &config.Ingest); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal ingest config: %w", err)
 	}
 
 	// Initialize Heatmap Config Manager

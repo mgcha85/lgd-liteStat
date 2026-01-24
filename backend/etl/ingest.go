@@ -1,14 +1,15 @@
 package etl
 
 import (
-	"bytes"
+	"database/sql"
 	"fmt"
 	"strings"
-	"text/template"
 	"time"
 
 	"lgd-litestat/config"
 	"lgd-litestat/database"
+
+	_ "github.com/lib/pq" // Postgres driver
 )
 
 // DataIngestor handles data ingestion from source systems
@@ -26,8 +27,7 @@ func NewDataIngestor(cfg *config.Config, repo *database.Repository) *DataIngesto
 }
 
 // IngestData ingests data from source systems for a given time range
-// If startTime or endTime is zero, it defaults to incremental mode (Latest -> Now)
-func (d *DataIngestor) IngestData(startTime, endTime time.Time, facilities []string) (map[string]int, error) {
+func (d *DataIngestor) IngestData(startTime, endTime time.Time, facilities []string, targets []string) (map[string]int, error) {
 	counts := make(map[string]int)
 
 	if len(facilities) == 0 {
@@ -37,8 +37,37 @@ func (d *DataIngestor) IngestData(startTime, endTime time.Time, facilities []str
 		}
 	}
 
+	// Determine targets
+	doHistory := true
+	doInspection := true
+	if len(targets) > 0 {
+		doHistory = false
+		doInspection = false
+		for _, t := range targets {
+			if t == "history" {
+				doHistory = true
+			}
+			if t == "inspection" {
+				doInspection = true
+			}
+		}
+	}
+
 	totalInspection := 0
 	totalHistory := 0
+
+	// Connect to DB once if Real Mode
+	var sourceDB *sql.DB
+	var err error
+	isRealMode := !d.config.MockData.Enabled
+
+	if isRealMode {
+		sourceDB, err = d.connectSourceDB()
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to source db: %w", err)
+		}
+		defer sourceDB.Close()
+	}
 
 	for _, fac := range facilities {
 		// Determine Time Range per Facility
@@ -50,11 +79,9 @@ func (d *DataIngestor) IngestData(startTime, endTime time.Time, facilities []str
 			if err != nil {
 				fmt.Printf("Warning: Failed to get latest timestamp for %s: %v. Defaulting to full load.\n", fac, err)
 			}
-
 			if !latest.IsZero() {
-				t1 = latest.Add(time.Second) // Start from next second
+				t1 = latest.Add(time.Second)
 			} else {
-				// Initial Load: Default to 30 days ago (or configured)
 				days := d.config.MockData.TimeRangeDays
 				if days == 0 {
 					days = 30
@@ -68,30 +95,220 @@ func (d *DataIngestor) IngestData(startTime, endTime time.Time, facilities []str
 
 		fmt.Printf("[%s] Ingesting data from %s to %s\n", fac, t1.Format(time.RFC3339), t2.Format(time.RFC3339))
 
-		// MOCK MODE
-		if d.config.MockData.Enabled {
-			// In mock mode, we just generate data.
-			// Ideally, we should pass t1, t2 to generator to make it realistic,
-			// but for now, the existing generator just generates "some" data.
-			// Faking it by just running existing mock generation.
+		if !isRealMode {
+			// Mock Mode
 			c, err := d.ingestMockData(fac)
 			if err != nil {
 				return nil, err
 			}
-			totalInspection += c["inspection"]
-			totalHistory += c["history"]
+			if doInspection {
+				totalInspection += c["inspection"]
+			}
+			if doHistory {
+				totalHistory += c["history"]
+			}
 			continue
 		}
 
-		// REAL MODE (Placeholder)
-		// 1. Fetch from Source DB (using t1, t2)
-		// 2. Insert into DuckDB (fac)
-		// ... implementation of real query ...
+		// REAL MODE
+		// 1. Ingest History
+		if doHistory {
+			hCount, err := d.ingestHistory(sourceDB, fac, t1, t2)
+			if err != nil {
+				fmt.Printf("Error ingesting history for %s: %v\n", fac, err)
+			}
+			totalHistory += hCount
+		}
+
+		// 2. Ingest Inspection
+		if doInspection {
+			iCount, err := d.ingestInspection(sourceDB, fac, t1, t2)
+			if err != nil {
+				fmt.Printf("Error ingesting inspection for %s: %v\n", fac, err)
+			}
+			totalInspection += iCount
+		}
 	}
 
 	counts["inspection"] = totalInspection
 	counts["history"] = totalHistory
 	return counts, nil
+}
+
+// ingestHistory handles real history data ingestion
+func (d *DataIngestor) ingestHistory(db *sql.DB, facility string, t1, t2 time.Time) (int, error) {
+	cols := d.config.Ingest.HistoryColumns
+	if len(cols) == 0 {
+		return 0, fmt.Errorf("no history columns configured")
+	}
+
+	colStr := strings.Join(cols, ", ")
+
+	hasFacilityCol := false
+	for _, c := range cols {
+		if c == "facility_code" {
+			hasFacilityCol = true
+			break
+		}
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE time_ymdhms BETWEEN $1 AND $2", colStr, d.config.Ingest.HistoryTable)
+	args := []interface{}{t1, t2}
+
+	if hasFacilityCol {
+		query += " AND facility_code = $3"
+		args = append(args, facility)
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var historyData []database.HistoryRow
+
+	// Scan logic
+	values := make([]interface{}, len(cols))
+	valuePtrs := make([]interface{}, len(cols))
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
+
+	for rows.Next() {
+		if err := rows.Scan(valuePtrs...); err != nil {
+			continue
+		}
+
+		var row database.HistoryRow
+		for i, colName := range cols {
+			valStr := toString(values[i])
+			switch colName {
+			case "glass_id":
+				row.ProductID = valStr
+			case "product_id":
+				row.ProductID = valStr
+			case "factory_code":
+				row.FactoryCode = valStr
+			case "process_code":
+				row.ProcessCode = valStr
+			case "time_ymdhms":
+				if t, ok := values[i].(time.Time); ok {
+					row.MoveInYmdhms = t
+				}
+			case "equipment_hierarchy_type_code":
+				row.EquipmentHierarchyTypeCode = valStr
+			case "equipment_line_id":
+				row.EquipmentLineID = valStr
+				row.EquipmentID = valStr
+			case "equipment_machine_id":
+				row.EquipmentMachineID = valStr
+			case "equipment_unit_id":
+				row.EquipmentUnitID = valStr
+			case "equipment_path_id":
+				row.EquipmentPathID = valStr
+			}
+		}
+		if row.ProductID != "" {
+			historyData = append(historyData, row)
+		}
+	}
+
+	if len(historyData) > 0 {
+		if err := d.repo.BulkInsertHistory(historyData, facility); err != nil {
+			return 0, err
+		}
+		fmt.Printf("Ingested %d history rows for %s\n", len(historyData), facility)
+	}
+	return len(historyData), nil
+}
+
+// ingestInspection handles real inspection data ingestion
+func (d *DataIngestor) ingestInspection(db *sql.DB, facility string, t1, t2 time.Time) (int, error) {
+	cols := d.config.Ingest.InspectionColumns
+	if len(cols) == 0 {
+		return 0, fmt.Errorf("no inspection columns configured")
+	}
+
+	colStr := strings.Join(cols, ", ")
+
+	hasFacilityCol := false
+	for _, c := range cols {
+		if c == "facility_code" {
+			hasFacilityCol = true
+			break
+		}
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE inspection_end_ymdhms BETWEEN $1 AND $2", colStr, d.config.Ingest.InspectionTable)
+	args := []interface{}{t1, t2}
+
+	if hasFacilityCol {
+		query += " AND facility_code = $3"
+		args = append(args, facility)
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var inspectionData []database.InspectionRow
+	values := make([]interface{}, len(cols))
+	valuePtrs := make([]interface{}, len(cols))
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
+
+	for rows.Next() {
+		if err := rows.Scan(valuePtrs...); err != nil {
+			continue
+		}
+
+		var row database.InspectionRow
+		for i, colName := range cols {
+			val := values[i]
+			valStr := toString(val)
+
+			switch colName {
+			case "product_id":
+				row.ProductID = valStr
+			case "facility_code":
+				row.FacilityCode = valStr
+			case "process_code":
+				row.ProcessCode = valStr
+			case "inspection_end_ymdhms":
+				if t, ok := val.(time.Time); ok {
+					row.InspectionEndYmdhms = t
+				}
+			case "def_pnt_x":
+				row.DefPntX = toFloat32(val)
+			case "def_pnt_y":
+				row.DefPntY = toFloat32(val)
+			case "def_pnt_g":
+				row.DefPntG = uint32(toFloat32(val))
+			case "def_pnt_d":
+				row.DefPntD = uint32(toFloat32(val))
+			case "def_size":
+				row.DefSize = toFloat32(val)
+			case "def_latest_summary_defect_term_name_s":
+				row.DefectLatestSummaryDefectTermNameS = valStr
+				row.DefectName = extractDefectName(valStr)
+			}
+		}
+		if row.ProductID != "" {
+			inspectionData = append(inspectionData, row)
+		}
+	}
+
+	if len(inspectionData) > 0 {
+		if err := d.repo.BulkInsertInspection(inspectionData, facility); err != nil {
+			return 0, err
+		}
+		fmt.Printf("Ingested %d inspection rows for %s\n", len(inspectionData), facility)
+	}
+	return len(inspectionData), nil
 }
 
 // ingestMockData generates and inserts mock data
@@ -116,141 +333,41 @@ func (d *DataIngestor) ingestMockData(facility string) (map[string]int, error) {
 	}, nil
 }
 
-// TransformInspection transforms raw inspection data
-// Computes defect_name from term_name and handles coordinates
-func TransformInspection(raw map[string]interface{}) (database.InspectionRow, error) {
-	row := database.InspectionRow{}
-
-	// Extract fields
-	// Helper: ProductID from product_id or glass_id (legacy)
-	if v, ok := raw["product_id"].(string); ok {
-		row.ProductID = v
-	} else if v, ok := raw["glass_id"].(string); ok { // Legacy support
-		row.ProductID = v
+// Helpers
+func toString(val interface{}) string {
+	if val == nil {
+		return ""
 	}
-
-	if v, ok := raw["panel_id"].(string); ok {
-		row.PanelID = v
+	switch v := val.(type) {
+	case []byte:
+		return string(v)
+	case string:
+		return v
+	case time.Time:
+		return v.Format(time.RFC3339)
+	default:
+		return fmt.Sprintf("%v", v)
 	}
-	if v, ok := raw["model_code"].(string); ok {
-		row.ModelCode = v
-	}
-
-	// Term Name logic: Source Term -> Derived DefectName
-	if v, ok := raw["def_latest_summary_defect_term_name_s"].(string); ok {
-		row.DefectLatestSummaryDefectTermNameS = v
-		// Extract defect_name (elements 2 and 4, i.e., indices 1 and 3)
-		row.DefectName = extractDefectName(v)
-	} else if v, ok := raw["term_name"].(string); ok { // Legacy
-		row.DefectLatestSummaryDefectTermNameS = v
-		row.DefectName = extractDefectName(v)
-	}
-
-	// Panel Address Logic: panel_addr = panel_id - product_id
-	if row.PanelID != "" && row.ProductID != "" {
-		if strings.HasPrefix(row.PanelID, row.ProductID) {
-			row.PanelAddr = strings.TrimPrefix(row.PanelID, row.ProductID)
-			if len(row.PanelAddr) > 0 {
-				// X is all but last char, Y is last char
-				row.PanelX = row.PanelAddr[:len(row.PanelAddr)-1]
-				row.PanelY = row.PanelAddr[len(row.PanelAddr)-1:]
-			}
-		} else {
-			// Fallback if ID doesn't match expected pattern
-			row.PanelAddr = row.PanelID
-		}
-	}
-
-	if v, ok := raw["process_code"].(string); ok {
-		row.ProcessCode = v
-	}
-
-	// Inspection Time
-	if v, ok := raw["inspection_end_ymdhms"].(time.Time); ok {
-		row.InspectionEndYmdhms = v
-	} else if vStr, ok := raw["inspection_end_ymdhms"].(string); ok {
-		// Try parsing if string
-		if t, err := time.Parse(time.RFC3339, vStr); err == nil {
-			row.InspectionEndYmdhms = t
-		}
-	}
-
-	// X/Y Coordinates
-	// Ensure float32 conversion from float64 (json default) or string
-	if v, ok := raw["def_pnt_x"].(float64); ok {
-		row.DefPntX = float32(v)
-	}
-	if v, ok := raw["def_pnt_y"].(float64); ok {
-		row.DefPntY = float32(v)
-	}
-
-	// G/D Integers
-	if v, ok := raw["def_pnt_g"].(float64); ok {
-		row.DefPntG = uint32(v)
-	}
-	if v, ok := raw["def_pnt_d"].(float64); ok {
-		row.DefPntD = uint32(v)
-	}
-	if v, ok := raw["def_size"].(float64); ok {
-		row.DefSize = float32(v)
-	}
-
-	return row, nil
 }
 
-// DeduplicateHistory keeps only the last occurrence per product+process+equipment
-func DeduplicateHistory(history []database.HistoryRow) []database.HistoryRow {
-	// Build a map with composite key
-	type key struct {
-		productID string
-		process   string
-		equipment string
+func toFloat32(val interface{}) float32 {
+	if val == nil {
+		return 0
 	}
-
-	latest := make(map[key]database.HistoryRow)
-
-	for _, row := range history {
-		k := key{
-			productID: row.ProductID,
-			process:   row.ProcessCode,
-			equipment: row.EquipmentLineID,
-		}
-
-		// Keep the one with latest time (seq_num removed/less relevant if strict time available)
-		if existing, exists := latest[k]; exists {
-			if row.MoveInYmdhms.After(existing.MoveInYmdhms) {
-				latest[k] = row
-			}
-		} else {
-			latest[k] = row
-		}
+	switch v := val.(type) {
+	case float64:
+		return float32(v)
+	case float32:
+		return v
+	case int64:
+		return float32(v)
+	case int:
+		return float32(v)
+	default:
+		return 0
 	}
-
-	// Convert map back to slice
-	result := make([]database.HistoryRow, 0, len(latest))
-	for _, row := range latest {
-		result = append(result, row)
-	}
-
-	return result
 }
 
-// executeTemplateQuery executes a query template with parameters
-func executeTemplateQuery(queryTemplate string, params map[string]interface{}) (string, error) {
-	tmpl, err := template.New("query").Parse(queryTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse query template: %w", err)
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, params); err != nil {
-		return "", fmt.Errorf("failed to execute query template: %w", err)
-	}
-
-	return buf.String(), nil
-}
-
-// extractDefectName extracts elements 2 and 4 from term_name (helper function)
 func extractDefectName(termName string) string {
 	parts := strings.Split(termName, "-")
 	// Expected format: TYPE-DEFECT-SIZE-REASON (e.g., TYPE1-SPOT-SIZE-DARK)
@@ -259,4 +376,20 @@ func extractDefectName(termName string) string {
 		return termName
 	}
 	return parts[1] + "-" + parts[3]
+}
+
+// connectSourceDB establishes connection to source PostgreSQL
+func (d *DataIngestor) connectSourceDB() (*sql.DB, error) {
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		d.config.SourceDBHost, d.config.SourceDBPort, d.config.SourceDBUser,
+		d.config.SourceDBPassword, d.config.SourceDBName)
+
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+	return db, nil
 }

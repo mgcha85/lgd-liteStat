@@ -73,7 +73,7 @@ func (s *Scheduler) RunJob() {
 	log.Println("[Scheduler] Starting Scheduled Ingestion...")
 
 	// 1. Ingest Data (Incremental)
-	counts, err := s.ingestor.IngestData(time.Time{}, time.Time{}, nil)
+	counts, err := s.ingestor.IngestData(time.Time{}, time.Time{}, nil, nil)
 	if err != nil {
 		log.Printf("[Scheduler] Ingestion Failed: %v\n", err)
 	} else {

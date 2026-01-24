@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # Backend Dev Service (Go + Air for hot reload)
+  litestat-backend-dev:
+    container_name: litestat-backend-dev
+    image: golang:1.24-bookworm
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+      - ./.env:/app/.env
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_PATH=/app/data/analytics.duckdb
+      - API_PORT=8080
+    command: [ "sh", "-c", "go install -mod=mod github.com/air-verse/air@latest && air" ]
+    restart: always
+
+  # Frontend Dev Service (Svelte + Vite)
+  litestat-frontend-dev:
+    container_name: litestat-frontend-dev
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      # Avoid overwriting node_modules
+      - /app/node_modules
+    ports:
+      - "8081:8081"
+    command: [ "sh", "-c", "npm install && npm run dev -- --host" ]
+    environment:
+      - VITE_API_URL=http://litestat-backend-dev:8080
+    depends_on:
+      - litestat-backend-dev
+
+networks:
+  default:
+    driver: bridge

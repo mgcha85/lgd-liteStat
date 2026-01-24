@@ -2,21 +2,18 @@ services:
   # Backend Service (Go + DuckDB)
   litestat-backend:
     container_name: litestat-backend
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
     image: lgd-litestat-backend:prod
     restart: always
     environment:
       - DB_PATH=/app/data/analytics.duckdb
       - API_PORT=8080
     volumes:
-      - ./data:/app/data                   # Data persistence (Prod partitioning)
-      - ./config.yaml:/app/config.yaml     # Config file
-      - ./.env:/app/.env                   # Secrets
+      - ./data:/app/data # Data persistence (Prod partitioning)
+      - ./config.yaml:/app/config.yaml # Config file
+      - ./.env:/app/.env # Secrets
     # Healthcheck to ensure readiness
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,13 +21,10 @@ services:
   # Frontend Service (Svelte + Nginx)
   litestat-frontend:
     container_name: litestat-frontend
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
     image: lgd-litestat-frontend:prod
     restart: always
     ports:
-      - "8081:80"  # Expose on port 8081
+      - "8081:80" # Expose on port 8081
     depends_on:
       litestat-backend:
         condition: service_healthy
