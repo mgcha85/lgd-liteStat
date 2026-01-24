@@ -60,19 +60,18 @@ func (m *MartBuilder) Refresh(facility string) (MartStats, error) {
 		CREATE OR REPLACE TABLE glass_stats AS
 		WITH glass_defects AS (
 			SELECT 
-				glass_id,
+				product_id,
 				list_distinct(list(
 					(ascii(SUBSTR(panel_addr, 1, 1)) - 65) * 10 + 
 					CAST(SUBSTR(panel_addr, 2, 1) AS INTEGER) + 1
 				)) as defect_indices
 			FROM inspection
 			WHERE panel_addr IS NOT NULL AND LENGTH(panel_addr) >= 2
-			GROUP BY glass_id
+			GROUP BY product_id
 		)
 		SELECT 
-			h.glass_id,
-			h.lot_id,
 			h.product_id,
+			h.lot_id,
 			CAST(h.timekey_ymdhms AS DATE) AS work_date,
 			COALESCE(SUM(i.defect_count), 0) AS total_defects,
 			list_transform(range(1, 261), idx -> 
@@ -83,13 +82,13 @@ func (m *MartBuilder) Refresh(facility string) (MartStats, error) {
 		FROM (
 			SELECT * FROM (
 				SELECT *, 
-					ROW_NUMBER() OVER (PARTITION BY glass_id ORDER BY timekey_ymdhms DESC) as rn
+					ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY timekey_ymdhms DESC) as rn
 				FROM history
 			) WHERE rn = 1
 		) h
-		LEFT JOIN inspection i ON h.glass_id = i.glass_id
-		LEFT JOIN glass_defects d ON h.glass_id = d.glass_id
-		GROUP BY h.glass_id, h.lot_id, h.product_id, CAST(h.timekey_ymdhms AS DATE), d.defect_indices;
+		LEFT JOIN inspection i ON h.product_id = i.product_id
+		LEFT JOIN glass_defects d ON h.product_id = d.product_id
+		GROUP BY h.product_id, h.lot_id, CAST(h.timekey_ymdhms AS DATE), d.defect_indices;
 	`
 
 	if _, err := conn.Exec(query); err != nil {
@@ -136,7 +135,7 @@ func (m *MartBuilder) Refresh(facility string) (MartStats, error) {
 	err = conn.QueryRow(`
 		SELECT COUNT(DISTINCT h.lot_id) 
 		FROM glass_stats g
-		JOIN history h ON g.glass_id = h.glass_id
+		JOIN history h ON g.product_id = h.product_id
 	`).Scan(&stats.UniqueLots)
 	if err != nil {
 		log.Printf("Warning: Failed to get unique lots: %v", err)
