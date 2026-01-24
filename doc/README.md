@@ -66,7 +66,7 @@ podman-compose -f docker-compose.prod.yml up -d --build
 - **Frontend**: Nginx를 통해 정적 파일을 서빙하며 Gzip 압축이 적용됩니다.
 
 #### 포트 정보
-- **8080**: Backend API (컨테이너 내부)
+- **8082**: Backend API (컨테이너 내부)
 - **8081**: Frontend (Nginx 리버스 프록시, 브라우저에서 접속)
 
 ### 공장(Facilities) 설정

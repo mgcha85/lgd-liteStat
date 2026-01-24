@@ -5,10 +5,10 @@
 ## 기본 URL (Base URL)
 
 ```
-http://localhost:8080
+http://localhost:8082
 ```
 
-> **참고**: 프로덕션 환경에서 프론트엔드는 `http://localhost:8081`에서 접속하며, Nginx가 API 요청을 백엔드(8080)로 프록시합니다.
+> **참고**: 프로덕션 환경에서 프론트엔드는 `http://localhost:8081`에서 접속하며, Nginx가 API 요청을 백엔드(8082)로 프록시합니다.
 
 ## 공장 선택 (Facility Selection)
 
@@ -50,7 +50,7 @@ GET /api/health
 
 ### 요청 예시
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:8082/health
 ```
 
 ### 응답 (200 OK)
@@ -95,7 +95,7 @@ GET /api/inspection
 
 **기본 시간 범위 조회:**
 ```bash
-curl "http://localhost:8080/api/inspection?start_time=2024-01-01%2000:00:00&end_time=2024-01-31%2023:59:59"
+curl "http://localhost:8082/api/inspection?start_time=2024-01-01%2000:00:00&end_time=2024-01-31%2023:59:59"
 ```
 
 ---
@@ -119,7 +119,7 @@ GET /api/history
 
 #### 요청 예시
 ```bash
-curl "http://localhost:8080/api/history?glass_id=G00000001"
+curl "http://localhost:8082/api/history?glass_id=G00000001"
 ```
 
 ---
@@ -144,7 +144,7 @@ POST /api/ingest
 
 #### 요청 예시
 ```bash
-curl -X POST http://localhost:8080/api/ingest \
+curl -X POST http://localhost:8082/api/ingest \
   -H "Content-Type: application/json" \
   -d '{
     "start_time": "2024-01-01T00:00:00Z",
@@ -165,7 +165,7 @@ POST /api/mart/refresh
 
 #### 요청 예시
 ```bash
-curl -X POST http://localhost:8080/api/mart/refresh
+curl -X POST http://localhost:8082/api/mart/refresh
 ```
 
 ---
@@ -204,7 +204,7 @@ POST /api/analyze
 
 #### 요청 예시
 ```bash
-curl -X POST http://localhost:8080/api/analyze \
+curl -X POST http://localhost:8082/api/analyze \
   -H "Content-Type: application/json" \
   -d '{
     "defect_name": "SPOT-DARK",
@@ -267,7 +267,7 @@ GET /api/equipment/rankings
 
 #### 요청 예시
 ```bash
-curl "http://localhost:8080/api/equipment/rankings?start_date=2024-01-01&end_date=2024-12-31"
+curl "http://localhost:8082/api/equipment/rankings?start_date=2024-01-01&end_date=2024-12-31"
 ```
 
 ---

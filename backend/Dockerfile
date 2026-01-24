@@ -33,7 +33,7 @@ COPY --from=builder /build/database/schema_sqlite.sql ./database/
 RUN mkdir -p /app/data
 
 # Expose API port
-EXPOSE 8080
+EXPOSE 8082
 
 # Run the application
 CMD ["./lgd-litestat"]

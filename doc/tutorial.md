@@ -13,7 +13,7 @@ Docker Compose를 사용하여 간단하게 기동할 수 있습니다.
 # 최신 이미지 빌드 및 실행
 docker-compose -f docker-compose.prod.yml up -d
 ```
-- **Backend**: `http://localhost:8080`
+- **Backend**: `http://localhost:8082`
 - **Frontend**: `http://localhost:8081`
 
 ### 1.2 개발 모드 (Development Mode)
@@ -27,7 +27,7 @@ docker-compose -f docker-compose.prod.yml up -d
 2.  **동작 방식**:
     - **Backend**: `air`를 통해 Go 코드가 변경될 때마다 자동으로 재빌드/재시작됩니다.
     - **Frontend**: Vite Dev Server가 실행되어 즉각적인 HMR(Hot Module Replacement)을 지원합니다.
-    - **접속**: Frontend(`http://localhost:8081`), Backend API(`http://localhost:8080`)
+    - **접속**: Frontend(`http://localhost:8081`), Backend API(`http://localhost:8082`)
 
 3.  **개발 시 테스트 방법**:
     - API 수정 후: `curl`로 즉시 테스트 (서버 자동 재시작됨).
@@ -82,7 +82,7 @@ LGD liteStat은 RESTful API를 통해 데이터 조회 및 분석 기능을 제�
 
 **예제: 2024년 1월 데이터 다운로드**
 ```bash
-curl -X POST http://localhost:8080/api/ingest \
+curl -X POST http://localhost:8082/api/ingest \
   -H "Content-Type: application/json" \
   -d '{
     "start_time": "2024-01-01T00:00:00Z",
@@ -95,7 +95,7 @@ curl -X POST http://localhost:8080/api/ingest \
 수집된 Raw Data를 기반으로 통계 분석을 위한 Materialized View를 갱신해야 분석 결과에 반영됩니다. 대량의 데이터 수집 후에는 반드시 이 API를 호출해주세요.
 
 ```bash
-curl -X POST http://localhost:8080/api/mart/refresh
+curl -X POST http://localhost:8082/api/mart/refresh
 ```
 
 ### 팁 (Tip)

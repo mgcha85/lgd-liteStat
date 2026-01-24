@@ -7,9 +7,9 @@ echo "Loading images..."
 docker load -i backend.tar
 docker load -i frontend.tar
 # Load Dev images if present
-if [ -f "dev-base.tar" ]; then
-    echo "Loading Dev Base images..."
-    docker load -i dev-base.tar
+if [ -f "dev-images.tar" ]; then
+    echo "Loading Dev images..."
+    docker load -i dev-images.tar
 fi
 
 echo "Starting services..."

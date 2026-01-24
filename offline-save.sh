@@ -4,7 +4,7 @@
 # Usage: ./offline-save.sh
 
 # Cleanup previous files
-rm -f backend.tar frontend.tar dev-base.tar
+rm -f backend.tar frontend.tar dev-base.tar dev-images.tar
 
 echo "Saving images..."
 
@@ -23,15 +23,15 @@ fi
 podman save --format docker-archive -o backend.tar lgd-litestat-backend:prod
 podman save --format docker-archive -o frontend.tar lgd-litestat-frontend:prod
 
-# Save Dev Base Images
-echo "Saving Dev Base images (Golang & Node)..."
-# Pull if not exists (optional, assuming they exist from dev run)
-podman pull docker.io/library/golang:1.24-bookworm
-podman pull docker.io/library/node:20-alpine
+# Save Dev Images (Build custom dev images with dependencies)
+echo "Building Dev Images..."
+podman build -f ./backend/Dockerfile.dev -t lgd-litestat-backend:dev ./backend
+podman build -f ./frontend/Dockerfile.dev -t lgd-litestat-frontend:dev ./frontend
 
-podman save --format docker-archive -o dev-base.tar docker.io/library/golang:1.24-bookworm docker.io/library/node:20-alpine
+echo "Saving Dev Images..."
+podman save --format docker-archive -o dev-images.tar lgd-litestat-backend:dev lgd-litestat-frontend:dev
 
 echo "Done! Transfer the following to the offline server:"
-echo "1. Images: backend.tar, frontend.tar, dev-base.tar"
+echo "1. Images: backend.tar, frontend.tar, dev-images.tar"
 echo "2. Configs: docker-compose.prod.yml, docker-compose.dev.yml, offline-load.sh"
 echo "3. Source Code (for Dev): backend/, frontend/ folders"

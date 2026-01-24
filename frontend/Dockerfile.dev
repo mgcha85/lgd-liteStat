@@ -1,0 +1,10 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies
+COPY package.json package-lock.json ./
+RUN npm install
+
+# Source code will be mounted at runtime, shielding node_modules
+CMD ["npm", "run", "dev", "--", "--host"]
