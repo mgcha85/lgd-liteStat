@@ -98,42 +98,92 @@ def main():
             if "product_id" in df.columns:
                 df = df.sort_values(by="product_id")
 
-            # Direct DuckDB Insertion
+            # ---------------------------------------------------------
+            # Hash Bucketing + Bloom Filter Storage Strategy
+            # Structure: facility_code / model / bucket / date.parquet
+            # ---------------------------------------------------------
+            import hashlib
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+
+            # 1. Add Bucket ID
+            def get_bucket(val):
+                if not isinstance(val, str):
+                    return "00"
+                # Simple consistent hash: MD5 mod 100
+                h = int(hashlib.md5(val.encode("utf-8")).hexdigest(), 16)
+                return f"{h % 100:02d}"
+
+            if "product_id" in df.columns:
+                df["bucket_id"] = df["product_id"].apply(get_bucket)
+            else:
+                df["bucket_id"] = "00"
+
+            # 2. Add Partition Columns if missing
+            if "facility_code" not in df.columns:
+                df["facility_code"] = facility  # Should be 'P8' etc.
+
+            # Ensure model code exists (fill 'UNKNOWN' if missing)
+            if "product_model_code" not in df.columns:
+                df["product_model_code"] = "UNKNOWN"
+            else:
+                df["product_model_code"] = df["product_model_code"].fillna("UNKNOWN")
+
+            # 3. Write to Parquet with Bloom Filter
+            # Partitioning: facility_code -> product_model_code -> bucket_id
+            # Filename: YYYY-MM-DD.parquet inside the bucket folder
+
+            table = pa.Table.from_pandas(df)
+
+            # Define File Options with Bloom Filter
+            # Enable BF for product_id
+            # Note: pyarrow.parquet.write_to_dataset uses 'file_options' in recent versions,
+            # or we can write manually. Given the specific structure requested:
+            # facility_code=.../model=.../bucket=.../YYYY-MM-DD.parquet
+            # We can use write_to_dataset with partition_cols.
+
+            # But the user requested "date.parquet" filename specifically.
+            # write_to_dataset usually generates "part-{i}.parquet" or similar.
+            # We can use basename_template to force a name prefix, but getting exactly "2023-10-27.parquet"
+            # might require manual partition iteration if we want simple filenames.
+            # However, standard Hive partitioning is usually directory-based.
+            # User example: /data/.../bucket=01/2023-10-27.parquet
+            # We will use write_to_dataset with basename_template setting.
+
+            date_str = curr.strftime("%Y-%m-%d")
+
+            # Use 'history' subdir in DATA_DIR
+            history_root = os.path.join(DATA_DIR, "history")
+
+            pq.write_to_dataset(
+                table,
+                root_path=history_root,
+                partition_cols=["facility_code", "product_model_code", "bucket_id"],
+                basename_template=f"{date_str}_{{i}}.parquet",
+                existing_data_behavior="overwrite_or_ignore",
+                file_options=pq.ParquetFileOptions(
+                    bloom_filter_level="default", bloom_filter_columns={"product_id"}
+                ),
+            )
+
+            logger.info(f"Saved Hash-Bucketed Parquet for {date_str}")
+
+            # ---------------------------------------------------------
+            # Daily Batch Analysis: Join History (Parquet) + Inspection (Parquet)
+            # target: glass_stats
+            # ---------------------------------------------------------
+
+            # Direct DuckDB Insertion Logic Removed (Replaced by Parquet)
+            # Now we use DuckDB to Query the PARQUET files we just wrote.
+
             import duckdb
 
             # Use DB_PATH from env or default to shared volume path
             db_path = os.getenv("DB_PATH", "/app/data/analytics.duckdb")
-
             con = duckdb.connect(db_path)
 
-            # Create table if not exists (using DataFrame schema inferred by DuckDB)
-            # We use 'create or replace' or 'insert into'?
-            # Since it's history, we append.
-            # But we must ensure table exists.
-
             try:
-                # Create table structure if not exists
-                # We can use the DF to create a template if needed, or rely on 'CREATE TABLE IF NOT EXISTS'
-                # But best way with DF is:
-                con.execute(
-                    "CREATE TABLE IF NOT EXISTS history AS SELECT * FROM df LIMIT 0"
-                )
-
-                # Create Index if not exists
-                con.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_history_product_id ON history(product_id)"
-                )
-
-                # Insert data
-                con.execute("INSERT INTO history SELECT * FROM df")
-                logger.info(f"Inserted {len(df)} rows into DuckDB history table.")
-
-                # ---------------------------------------------------------
-                # Daily Batch Analysis: Join History (DuckDB) + Inspection (Parquet)
-                # target: glass_stats
-                # ---------------------------------------------------------
-
-                # 1. Ensure Analysis Table Exists (Update schema to include panel_map)
+                # 1. Ensure Analysis Table Exists & Has Correct Schema
                 con.execute("""
                     CREATE TABLE IF NOT EXISTS glass_stats (
                         product_id TEXT PRIMARY KEY,
@@ -146,6 +196,12 @@ def main():
                         created_at TIMESTAMP
                     )
                 """)
+
+                # Migration check for panel_addrs
+                try:
+                    con.execute("ALTER TABLE glass_stats ADD COLUMN panel_addrs TEXT[]")
+                except Exception:
+                    pass
 
                 # 2. Perform Join & Aggregation
                 # Check available columns in history table to avoid errors
@@ -161,8 +217,13 @@ def main():
 
                 # Logic refers to backend/mart/mart.go
                 # We calculate defect_indices from panel_addr and map to 260 array
+                # Added panel_addrs list aggregation
+                # MODIFIED: Read from History Parquet instead of Table
                 analysis_sql = f"""
-                    INSERT INTO glass_stats
+                    INSERT INTO glass_stats (
+                        product_id, lot_id, product_model_code, work_date, 
+                        total_defects, panel_map, panel_addrs, created_at
+                    )
                     WITH glass_defects AS (
                         SELECT 
                             product_id,
@@ -176,6 +237,11 @@ def main():
                         FROM read_parquet('{DATA_DIR}/inspection/**/*.parquet', hive_partitioning=true)
                         WHERE panel_addr IS NOT NULL
                         GROUP BY product_id
+                    ),
+                    history_source AS (
+                        SELECT * 
+                        FROM read_parquet('{history_root}/**/*.parquet', hive_partitioning=true)
+                        WHERE facility_code = '{facility}'
                     )
                     SELECT 
                         h.{p_id} as product_id,
@@ -189,7 +255,7 @@ def main():
                         ) as panel_map,
                         COALESCE(d.panel_addrs, []) as panel_addrs,
                         CURRENT_TIMESTAMP as created_at
-                    FROM history h
+                    FROM history_source h
                     LEFT JOIN glass_defects d ON h.{p_id} = d.product_id
                     WHERE strftime(CAST(h.{w_date} AS DATE), '%Y-%m-%d') = '{target_day}'
                     ON CONFLICT (product_id) DO UPDATE SET 
