@@ -155,16 +155,25 @@ def main():
             # Use 'history' subdir in DATA_DIR
             history_root = os.path.join(DATA_DIR, "history")
 
-            pq.write_to_dataset(
-                table,
-                root_path=history_root,
-                partition_cols=["facility_code", "product_model_code", "bucket_id"],
-                basename_template=f"{date_str}_{{i}}.parquet",
-                existing_data_behavior="overwrite_or_ignore",
-                file_options=pq.ParquetFileOptions(
-                    bloom_filter_level="default", bloom_filter_columns={"product_id"}
-                ),
-            )
+            # Prepare arguments for write_to_dataset
+            write_kwargs = {
+                "root_path": history_root,
+                "partition_cols": ["facility_code", "product_model_code", "bucket_id"],
+                "basename_template": f"{date_str}_{{i}}.parquet",
+                "existing_data_behavior": "overwrite_or_ignore",
+            }
+
+            # Check if ParquetFileOptions is available (PyArrow >= 13.0.0)
+            if hasattr(pq, "ParquetFileOptions"):
+                try:
+                    write_kwargs["file_options"] = pq.ParquetFileOptions(
+                        bloom_filter_level="default",
+                        bloom_filter_columns={"product_id"},
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to configure Bloom Filter: {e}")
+
+            pq.write_to_dataset(table, **write_kwargs)
 
             logger.info(f"Saved Hash-Bucketed Parquet for {date_str}")
 

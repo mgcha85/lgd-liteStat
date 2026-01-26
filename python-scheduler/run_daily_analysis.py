@@ -187,6 +187,50 @@ def main():
                 """
 
                 con.execute(analysis_sql)
+
+                # ---------------------------------------------------------
+                # 2. Defect Level Aggregation (glass_defect_stats)
+                # ---------------------------------------------------------
+                # Group by product_id, defect_name to get counts per defect type
+                con.execute("""
+                    CREATE TABLE IF NOT EXISTS glass_defect_stats (
+                        product_id TEXT,
+                        defect_name TEXT,
+                        defect_count INTEGER,
+                        created_at TIMESTAMP,
+                        PRIMARY KEY (product_id, defect_name)
+                    )
+                """)
+
+                defect_stats_sql = f"""
+                    INSERT INTO glass_defect_stats (product_id, defect_name, defect_count, created_at)
+                    WITH daily_insp AS (
+                        SELECT product_id, defect_name
+                        FROM read_parquet('{DATA_DIR}/inspection/**/*.parquet', hive_partitioning=true)
+                        WHERE facility_code = '{facility}'
+                          AND strftime(CAST(inspection_end_ymdhms AS DATE), '%Y-%m-%d') = '{target_day}'
+                          AND defect_name IS NOT NULL
+                    ),
+                    agg_defects AS (
+                        SELECT 
+                            product_id, 
+                            defect_name, 
+                            COUNT(*) as defect_count
+                        FROM daily_insp
+                        GROUP BY product_id, defect_name
+                    )
+                    SELECT 
+                        product_id,
+                        defect_name,
+                        defect_count,
+                        CURRENT_TIMESTAMP
+                    FROM agg_defects
+                    ON CONFLICT (product_id, defect_name) DO UPDATE SET
+                        defect_count = EXCLUDED.defect_count,
+                        created_at = CURRENT_TIMESTAMP
+                """
+                con.execute(defect_stats_sql)
+
                 logger.info(f"Analysis Batch Completed for {target_day}.")
 
             except Exception as e:
