@@ -116,7 +116,7 @@ def main():
                 # We can use the DF to create a template if needed, or rely on 'CREATE TABLE IF NOT EXISTS'
                 # But best way with DF is:
                 con.execute(
-                    f"CREATE TABLE IF NOT EXISTS history AS SELECT * FROM df LIMIT 0"
+                    "CREATE TABLE IF NOT EXISTS history AS SELECT * FROM df LIMIT 0"
                 )
 
                 # Create Index if not exists
@@ -133,7 +133,7 @@ def main():
                 # target: glass_stats
                 # ---------------------------------------------------------
 
-                # 1. Ensure Analysis Table Exists
+                # 1. Ensure Analysis Table Exists (Update schema to include panel_map)
                 con.execute("""
                     CREATE TABLE IF NOT EXISTS glass_stats (
                         product_id TEXT PRIMARY KEY,
@@ -141,6 +141,8 @@ def main():
                         product_model_code TEXT,
                         work_date DATE,
                         total_defects INTEGER,
+                        panel_map INTEGER[], -- Nested structure for panel defect map
+                        panel_addrs TEXT[],  -- Nested structure for raw panel addresses
                         created_at TIMESTAMP
                     )
                 """)
@@ -157,22 +159,43 @@ def main():
 
                 target_day = curr.strftime("%Y-%m-%d")
 
+                # Logic refers to backend/mart/mart.go
+                # We calculate defect_indices from panel_addr and map to 260 array
                 analysis_sql = f"""
                     INSERT INTO glass_stats
+                    WITH glass_defects AS (
+                        SELECT 
+                            product_id,
+                            list_distinct(list(
+                                CASE WHEN panel_addr IS NOT NULL AND LENGTH(panel_addr) >= 2 THEN
+                                    (ascii(SUBSTR(panel_addr, 1, 1)) - 65) * 10 + 
+                                    CAST(SUBSTR(panel_addr, 2, 1) AS INTEGER) + 1
+                                ELSE NULL END
+                            )) as defect_indices,
+                            list(panel_addr) as panel_addrs
+                        FROM read_parquet('{DATA_DIR}/inspection/**/*.parquet', hive_partitioning=true)
+                        WHERE panel_addr IS NOT NULL
+                        GROUP BY product_id
+                    )
                     SELECT 
                         h.{p_id} as product_id,
                         {l_id} as lot_id,
                         {m_code} as product_model_code,
                         CAST(h.{w_date} AS DATE) as work_date,
-                        COUNT(i.product_id) as total_defects,
+                        COALESCE(len(d.defect_indices), 0) as total_defects,
+                        list_transform(range(1, 261), idx -> 
+                            CASE WHEN list_contains(COALESCE(d.defect_indices, []), idx) THEN 1 
+                            ELSE 0 END
+                        ) as panel_map,
+                        COALESCE(d.panel_addrs, []) as panel_addrs,
                         CURRENT_TIMESTAMP as created_at
                     FROM history h
-                    LEFT JOIN read_parquet('{DATA_DIR}/inspection/**/*.parquet', hive_partitioning=true) i
-                    ON h.{p_id} = i.product_id
+                    LEFT JOIN glass_defects d ON h.{p_id} = d.product_id
                     WHERE strftime(CAST(h.{w_date} AS DATE), '%Y-%m-%d') = '{target_day}'
-                    GROUP BY 1, 2, 3, 4
                     ON CONFLICT (product_id) DO UPDATE SET 
                         total_defects = EXCLUDED.total_defects,
+                        panel_map = EXCLUDED.panel_map,
+                        panel_addrs = EXCLUDED.panel_addrs,
                         created_at = CURRENT_TIMESTAMP
                 """
 
