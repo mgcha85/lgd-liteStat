@@ -124,13 +124,16 @@ def main():
                 df["facility_code"] = facility  # Should be 'P8' etc.
 
             # Ensure model code exists (fill 'UNKNOWN' if missing)
-            if "product_model_code" not in df.columns:
-                df["product_model_code"] = "UNKNOWN"
+            if "model_code" not in df.columns:
+                df["model_code"] = df["product_id"].str[2:4]
             else:
-                df["product_model_code"] = df["product_model_code"].fillna("UNKNOWN")
+                df["model_code"] = df["model_code"].fillna("UNKNOWN")
+
+            if "lot_id" not in df.columns:
+                df["lot_id"] = df["product_id"].str[:-2]
 
             # 3. Write to Parquet with Bloom Filter
-            # Partitioning: facility_code -> product_model_code -> bucket_id
+            # Partitioning: facility_code -> model_code -> bucket_id
             # Filename: YYYY-MM-DD.parquet inside the bucket folder
 
             table = pa.Table.from_pandas(df)
@@ -158,7 +161,7 @@ def main():
             # Prepare arguments for write_to_dataset
             write_kwargs = {
                 "root_path": history_root,
-                "partition_cols": ["facility_code", "product_model_code", "bucket_id"],
+                "partition_cols": ["facility_code", "model_code", "bucket_id"],
                 "basename_template": f"{date_str}_{{i}}.parquet",
                 "existing_data_behavior": "overwrite_or_ignore",
             }

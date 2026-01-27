@@ -74,7 +74,6 @@ def main():
                 lot_id TEXT,
                 work_date DATE,
                 total_defects INTEGER,
-                panel_map INTEGER[], 
                 panel_addrs TEXT[],
                 created_at TIMESTAMP,
                 PRIMARY KEY (product_id, defect_name)
@@ -107,25 +106,7 @@ def main():
             # Note: "hourly" implies we might want to be specific about time range,
             # but strftime('%Y-%m-%d') on timestamp column covers the whole day.
 
-            # Dynamic SQL based on Aggregation Key
-            # Currently only 'panel_id' is fully implemented with specific logic
-            # (panel_addr parsing).
-
-            panel_parsing_logic = """
-                                CASE WHEN panel_addr IS NOT NULL AND LENGTH(panel_addr) >= 2 THEN
-                                    (ascii(SUBSTR(panel_addr, 1, 1)) - 65) * 10 + 
-                                    CAST(SUBSTR(panel_addr, 2, 1) AS INTEGER) + 1
-                                ELSE NULL END
-            """
-
-            if agg_key == "panel_addr":
-                # Standard Logic
-                pass
-            else:
-                # Placeholder for future keys (x,y grouping etc)
-                logger.warning(
-                    f"Aggregation key '{agg_key}' not fully implemented, falling back to basic panel_addr logic."
-                )
+            # Query using default aggregation logic (panel_addr)
 
             # Query:
             # 1. grouped_defects: Group by product_id AND defect_name.
@@ -135,7 +116,7 @@ def main():
             query = f"""
                 INSERT INTO glass_stats (
                     product_id, defect_name, model_code, lot_id, work_date, 
-                    total_defects, panel_map, panel_addrs, created_at
+                    total_defects, panel_addrs, created_at
                 )
                 WITH target_inspection AS (
                     SELECT 
@@ -144,7 +125,7 @@ def main():
                         panel_addr,
                         inspection_end_ymdhms
                     FROM read_parquet([
-                        '{inspection_root}/facility_code={facility}/*/*/data_*.parquet'
+                        '{inspection_root}/facility_code={facility}/*/*/inspection_data_*.parquet'
                     ], hive_partitioning=true)
                     WHERE 
                         strftime(inspection_end_ymdhms, '%Y-%m-%d') = '{target_date_str}'
@@ -153,7 +134,7 @@ def main():
                 target_history AS (
                     SELECT 
                         product_id, 
-                        product_model_code as model_code,
+                        model_code,
                         lot_id,
                         move_in_ymdhms
                     FROM read_parquet('{history_root}/**/*.parquet', hive_partitioning=true)
@@ -163,9 +144,6 @@ def main():
                     SELECT
                         product_id,
                         defect_name,
-                        list_distinct(list(
-                            {panel_parsing_logic}
-                        )) as defect_indices,
                         list(panel_addr) as panel_addrs,
                         COUNT(panel_addr) as total_defects
                     FROM target_inspection
@@ -179,12 +157,8 @@ def main():
                     h.lot_id,
                     CAST(h.move_in_ymdhms AS DATE) as work_date,
                     COALESCE(d.total_defects, 0) as total_defects,
-                    list_transform(range(1, 261), idx -> 
-                        CASE WHEN list_contains(COALESCE(d.defect_indices, []), idx) THEN 1 
-                        ELSE 0 END
-                    ) as panel_map,
                     COALESCE(d.panel_addrs, []) as panel_addrs,
-                    CURRENT_TIMESTAMP as created_at
+                    now() as created_at
                 FROM target_history h
                 LEFT JOIN grouped_defects d ON h.product_id = d.product_id
                 WHERE strftime(h.move_in_ymdhms, '%Y-%m-%d') = '{target_date_str}'
@@ -192,9 +166,8 @@ def main():
                     model_code = EXCLUDED.model_code,
                     lot_id = EXCLUDED.lot_id,
                     total_defects = EXCLUDED.total_defects,
-                    panel_map = EXCLUDED.panel_map,
                     panel_addrs = EXCLUDED.panel_addrs,
-                    created_at = CURRENT_TIMESTAMP
+                    created_at = now()
             """
 
             try:
