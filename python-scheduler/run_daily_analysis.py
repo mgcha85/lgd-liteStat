@@ -74,6 +74,7 @@ def main():
                 lot_id TEXT,
                 work_date DATE,
                 total_defects INTEGER,
+                panel_map INTEGER[], 
                 panel_addrs TEXT[],
                 created_at TIMESTAMP,
                 PRIMARY KEY (product_id, defect_name)
@@ -106,17 +107,21 @@ def main():
             # Note: "hourly" implies we might want to be specific about time range,
             # but strftime('%Y-%m-%d') on timestamp column covers the whole day.
 
-            # Query using default aggregation logic (panel_addr)
+            # Dynamic SQL based on Aggregation Key
+            # Currently only 'panel_id' is fully implemented with specific logic
+            # (panel_addr parsing).
 
+            # Logic: Convert 'A1' -> 1, 'A10' -> 10, 'B1' -> 11
+            # Row (A=0, B=1...) * 10 + Col (1..10)
             # Query:
-            # 1. grouped_defects: Group by product_id AND defect_name.
-            # 2. Join History (Left) -> Defects.
-            # 3. Handle NULL defect_name (No Defects found) -> 'NO_DEFECT' for PK safety.
+            # 1. inner_stats: Group by product_id, defect_name, panel_addr -> Count (Intensity)
+            # 2. grouped_defects: Aggregate into lists (addrs, counts)
+            # 3. Join History
 
             query = f"""
                 INSERT INTO glass_stats (
                     product_id, defect_name, model_code, lot_id, work_date, 
-                    total_defects, panel_addrs, created_at
+                    total_defects, panel_map, panel_addrs, created_at
                 )
                 WITH target_inspection AS (
                     SELECT 
@@ -140,14 +145,24 @@ def main():
                     FROM read_parquet('{history_root}/**/*.parquet', hive_partitioning=true)
                     WHERE facility_code = '{facility}'
                 ),
+                inner_stats AS (
+                    SELECT
+                        product_id,
+                        defect_name,
+                        panel_addr,
+                        COUNT(*) as addr_count
+                    FROM target_inspection
+                    WHERE panel_addr IS NOT NULL
+                    GROUP BY product_id, defect_name, panel_addr
+                ),
                 grouped_defects AS (
                     SELECT
                         product_id,
                         defect_name,
-                        list(panel_addr) as panel_addrs,
-                        COUNT(panel_addr) as total_defects
-                    FROM target_inspection
-                    WHERE panel_addr IS NOT NULL
+                        SUM(addr_count) as total_defects,
+                        list(panel_addr) as panel_addrs, -- Distinct addresses because of Group By above
+                        list(addr_count) as panel_map    -- Counts corresponding to addresses
+                    FROM inner_stats
                     GROUP BY product_id, defect_name
                 )
                 SELECT 
@@ -157,6 +172,7 @@ def main():
                     h.lot_id,
                     CAST(h.move_in_ymdhms AS DATE) as work_date,
                     COALESCE(d.total_defects, 0) as total_defects,
+                    COALESCE(d.panel_map, []) as panel_map,
                     COALESCE(d.panel_addrs, []) as panel_addrs,
                     now() as created_at
                 FROM target_history h
@@ -166,6 +182,7 @@ def main():
                     model_code = EXCLUDED.model_code,
                     lot_id = EXCLUDED.lot_id,
                     total_defects = EXCLUDED.total_defects,
+                    panel_map = EXCLUDED.panel_map,
                     panel_addrs = EXCLUDED.panel_addrs,
                     created_at = now()
             """
