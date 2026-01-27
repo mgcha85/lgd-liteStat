@@ -17,7 +17,6 @@ load_dotenv()
 # Env
 DATA_DIR = os.getenv("DATA_DIR", "/app/data/lake")
 CONFIG_PATH = os.getenv("CONFIG_PATH", "config.yaml")
-DB_PATH = os.getenv("DB_PATH", "/app/data/analytics.duckdb")
 
 
 def load_app_config():
@@ -145,7 +144,7 @@ def main():
                         panel_addr,
                         inspection_end_ymdhms
                     FROM read_parquet([
-                        '{inspection_root}/{facility}/*/*/data_*.parquet'
+                        '{inspection_root}/facility_code={facility}/*/*/data_*.parquet'
                     ], hive_partitioning=true)
                     WHERE 
                         strftime(inspection_end_ymdhms, '%Y-%m-%d') = '{target_date_str}'
