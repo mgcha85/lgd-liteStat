@@ -160,30 +160,29 @@ def main():
                         product_id,
                         defect_name,
                         SUM(addr_count) as total_defects,
-                        list(panel_addr) as panel_addrs, -- Distinct addresses because of Group By above
-                        list(addr_count) as panel_map    -- Counts corresponding to addresses
+                        list(panel_addr) as panel_addrs,
+                        list(addr_count) as panel_map
                     FROM inner_stats
                     GROUP BY product_id, defect_name
                 )
                 SELECT 
-                    h.product_id,
-                    COALESCE(d.defect_name, 'NO_DEFECT') as defect_name,
+                    d.product_id,
+                    d.defect_name,
                     COALESCE(h.model_code, 'UNKNOWN') as model_code,
                     h.lot_id,
                     CAST(h.move_in_ymdhms AS DATE) as work_date,
-                    COALESCE(d.total_defects, 0) as total_defects,
-                    COALESCE(d.panel_map, []) as panel_map,
-                    COALESCE(d.panel_addrs, []) as panel_addrs,
+                    d.total_defects,
+                    d.panel_map,
+                    d.panel_addrs,
                     now() as created_at
-                FROM target_history h
-                LEFT JOIN grouped_defects d ON h.product_id = d.product_id
-                WHERE strftime(h.move_in_ymdhms, '%Y-%m-%d') = '{target_date_str}'
+                FROM grouped_defects d
+                LEFT JOIN target_history h ON d.product_id = h.product_id
                 ON CONFLICT (product_id, defect_name) DO UPDATE SET 
                     model_code = EXCLUDED.model_code,
                     lot_id = EXCLUDED.lot_id,
-                    total_defects = EXCLUDED.total_defects,
-                    panel_map = EXCLUDED.panel_map,
-                    panel_addrs = EXCLUDED.panel_addrs,
+                    total_defects = glass_stats.total_defects + EXCLUDED.total_defects,
+                    panel_map = list_concat(glass_stats.panel_map, EXCLUDED.panel_map),
+                    panel_addrs = list_concat(glass_stats.panel_addrs, EXCLUDED.panel_addrs),
                     created_at = now()
             """
 
