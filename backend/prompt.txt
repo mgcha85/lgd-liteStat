@@ -1,0 +1,6 @@
+1. go만 이미 만들어둔 API를 살펴보고 현재의 duckdb 상태를 보고, 내가 아래에 설명한 동작들이 제대로 들어가있는지 확인하고 업데이트가 필요하면 진행해줘.
+2. 분석 기능 process_code, equipment_line_id별 (groupby)로 집계하는 기능 (해당 process_code, equipment_line_id별로는 product_id로 dedup - last one만 남고 나머지 제거) 불량 개수, 불량 맵, 불량 패널 주소, 진행 시간, product수 등.
+3. 2번 기능이 equipment_line_id뿐만 아니고 process_code, equipment_machine_id별, process_code, equipment_path_id별 등 process_code 이후 바뀔 수 있는데 그것도 고려해서 만들어줘. (equipment_line_id, equipment_machine_id, equipment_path_id 등은 실제 컬럼명이며, 순서대로 parent-child 관계를 가짐)
+4. 2번의 분석 기능이 만약 특정 process_code만 준다거나, 특정 process_code의 equipment_line을 준다거나, 또는 특정 equipment_line만 준다거나 하는 식으로 들어올 수 있는데 그것도 고려해서 만들어줘. (분석은 반드시 process_code별 equipment_line_id, ...별로 집계해야함 - 역시 parent-child관계)
+5. 분석결과엔 반드시 일별 dpu (defect수 / product수)가 포함되어야함.
+6. 분석결과엔 heatmap 데이터 (panel별 defect수/product수)가 포함되어야함.

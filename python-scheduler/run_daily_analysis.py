@@ -177,6 +177,7 @@ def main():
                     now() as created_at
                 FROM grouped_defects d
                 LEFT JOIN target_history h ON d.product_id = h.product_id
+                ORDER BY d.product_id, d.defect_name
                 ON CONFLICT (product_id, defect_name) DO UPDATE SET 
                     model_code = EXCLUDED.model_code,
                     lot_id = EXCLUDED.lot_id,
