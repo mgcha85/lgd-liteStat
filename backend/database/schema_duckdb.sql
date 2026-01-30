@@ -10,12 +10,16 @@ DROP VIEW IF EXISTS history;
 
 -- Mart Table (Still needed for aggregation speed)
 CREATE TABLE IF NOT EXISTS glass_stats (
-    product_id TEXT PRIMARY KEY,
+    product_id TEXT,
+    defect_name TEXT,
+    model_code TEXT,
     lot_id TEXT,
-    product_model_code TEXT, -- Was product_id
     work_date DATE,
     total_defects INTEGER,
-    created_at TIMESTAMP
+    panel_map INTEGER[],
+    panel_addrs TEXT[],
+    created_at TIMESTAMP,
+    PRIMARY KEY (product_id, defect_name)
 );
 
 -- VIEWS pointing to Parquet Data Lake

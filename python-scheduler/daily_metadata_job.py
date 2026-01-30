@@ -198,6 +198,9 @@ def main():
 
     start_date = datetime.strptime(args.start, "%Y-%m-%d")
     facility = args.fac
+
+    # User confirmed path: /app/data/lake/{fac}.duckdb
+    # DATA_DIR is usually /app/data/lake
     db_file = os.path.join(DATA_DIR, f"{facility}.duckdb")
 
     con = duckdb.connect(db_file)

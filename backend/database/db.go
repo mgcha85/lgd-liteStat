@@ -70,13 +70,30 @@ func Initialize(baseDuckPath string, facilities []string, appPath string) (*DB, 
 		}
 		analyticsDBs["default"] = db
 	} else {
-		// Case B: Facilities configured -> data/{facility}/duck.db
-		// We use baseDir from baseDuckPath (e.g. ./data)
+		// Case B: Facilities configured -> data/lake/{facility}.duckdb (Priority)
+		// We use baseDir from baseDuckPath (e.g. /app/data)
 		baseDir := filepath.Dir(baseDuckPath)
 
 		for _, fac := range facilities {
-			path := filepath.Join(baseDir, fac, "duck.db")
-			db, err := openDuck(path)
+			// Priority 1: data/lake/{fac}.duckdb (User specified)
+			pathLake := filepath.Join(baseDir, "lake", fmt.Sprintf("%s.duckdb", fac))
+			// Priority 2: data/{fac}/duck.db (Previous Folder structure)
+			pathFolder := filepath.Join(baseDir, fac, "duck.db")
+
+			var targetPath string
+
+			if _, err := os.Stat(pathLake); err == nil {
+				targetPath = pathLake
+			} else if _, err := os.Stat(pathFolder); err == nil {
+				targetPath = pathFolder
+			} else {
+				// Default to Lake structure
+				targetPath = pathLake
+			}
+
+			log.Printf("Facility %s: using DB path %s", fac, targetPath)
+
+			db, err := openDuck(targetPath)
 			if err != nil {
 				// Warn but continue? Or fail? Fail is safer.
 				return nil, fmt.Errorf("failed to open DB for facility %s: %w", fac, err)
