@@ -40,6 +40,7 @@ func SetupRouter(h *Handler) *mux.Router {
 	analyzeRouter := r.PathPrefix("/api/analyze").Subrouter()
 	analyzeRouter.HandleFunc("", h.RequestAnalysis).Methods("POST") // Matches /api/analyze
 	analyzeRouter.HandleFunc("/batch", h.AnalyzeBatch).Methods("POST")
+	analyzeRouter.HandleFunc("/hierarchy", h.AnalyzeHierarchyHandler).Methods("POST") // V2
 	analyzeRouter.HandleFunc("/stream", h.AnalyzeStream).Methods("POST")
 	analyzeRouter.HandleFunc("/range", h.AnalyzeDateRange).Methods("POST")
 	analyzeRouter.HandleFunc("/glass/{glassId}", h.AnalyzeGlass).Methods("GET")

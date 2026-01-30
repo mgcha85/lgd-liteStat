@@ -1,0 +1,35 @@
+# Dockerfile.offline
+# Use this file to build the backend on an offline server using vendored dependencies.
+
+# Stage 1: Builder
+# Ensure you have loaded 'golang:1.24-bookworm' image on the offline server first.
+FROM docker.io/library/golang:1.24-bookworm AS builder
+
+RUN apt-get update && apt-get install -y gcc g++ make
+
+WORKDIR /build
+
+# Copy all source code INCLUDING the 'vendor' directory
+# (You must run 'go mod vendor' on your dev machine before copying source)
+COPY . .
+
+# Build using vendor directory (No network required)
+RUN CGO_ENABLED=1 GOOS=linux go build -mod=vendor -o lgd-litestat main.go
+
+# Stage 2: Runtime
+# Ensure you have loaded 'debian:bookworm-slim' image on the offline server first.
+FROM docker.io/library/debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /build/lgd-litestat .
+COPY --from=builder /build/database/schema_duckdb.sql ./database/
+COPY --from=builder /build/database/schema_sqlite.sql ./database/
+
+RUN mkdir -p /app/data
+
+EXPOSE 8082
+
+CMD ["./lgd-litestat"]

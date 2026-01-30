@@ -1,6 +1,26 @@
-1. go만 이미 만들어둔 API를 살펴보고 현재의 duckdb 상태를 보고, 내가 아래에 설명한 동작들이 제대로 들어가있는지 확인하고 업데이트가 필요하면 진행해줘.
-2. 분석 기능 process_code, equipment_line_id별 (groupby)로 집계하는 기능 (해당 process_code, equipment_line_id별로는 product_id로 dedup - last one만 남고 나머지 제거) 불량 개수, 불량 맵, 불량 패널 주소, 진행 시간, product수 등.
-3. 2번 기능이 equipment_line_id뿐만 아니고 process_code, equipment_machine_id별, process_code, equipment_path_id별 등 process_code 이후 바뀔 수 있는데 그것도 고려해서 만들어줘. (equipment_line_id, equipment_machine_id, equipment_path_id 등은 실제 컬럼명이며, 순서대로 parent-child 관계를 가짐)
-4. 2번의 분석 기능이 만약 특정 process_code만 준다거나, 특정 process_code의 equipment_line을 준다거나, 또는 특정 equipment_line만 준다거나 하는 식으로 들어올 수 있는데 그것도 고려해서 만들어줘. (분석은 반드시 process_code별 equipment_line_id, ...별로 집계해야함 - 역시 parent-child관계)
-5. 분석결과엔 반드시 일별 dpu (defect수 / product수)가 포함되어야함.
-6. 분석결과엔 heatmap 데이터 (panel별 defect수/product수)가 포함되어야함.
+go만 이미 만들어둔 API를 살펴보고 현재의 duckdb 상태를 보고, 내가 아래에 설명한 동작들이 제대로 들어가있는지 확인하고 업데이트가 필요하면 진행해줘.
+frontend는 지금 고려 안하고, backend만 API로 먼저 구현할꺼야.
+개발단계이므로 코드만 수정하면 컨테이너 내에서 바로 빌드에서 사용할 수 있도록 세팅해줘.
+
+
+## 데이터 설명
+- 모든 데이터는 process_code > equpiment_line_id > equpiment_machine_id > equpiment_path_id 순서로 parent > child관계를 가짐.
+- 분석은 equpiment_line_id, equpiment_machine_id, equpiment_path_id 중 어디까지 분석을 하는지 미리 사용자에게 받음
+- 집계해야할 요소는 다음과 같다; 불량 개수, 불량 맵, 불량 패널 주소, 진행 시간, product수, 일별 dpu (defect수 / product수), heatmap 데이터 (panel별 defect수/product수) 등
+- equpiment_path_id까지 전부 분석을 하게 되면, process_code, equipment_line_id, equipment_machine_id, equpiment_path_id별 groupby를 한뒤, dedup을 하여 통계 집계를 하고, equpiment_line_id까지 분석을 하면 process_code, equipment_line_id별 groupby를 한뒤, dedup을 하여 통계 집계 한다.
+
+## 분석 파라미터
+required: 아래 중 하나는 충족
+- product_id, defect_name; produdct_id의 produdct_id[2:4]가 model_code임, duckdb의 model_code를 참고하여 db에 없는 model_code라면 제거하고 메세지를 준다.
+- start_date, end_date, defect_name, model_code, duckdb의 model_code를 참고하여 db에 없는 model_code라면 제거하고 메세지를 준다.
+optional: 
+- process_code (범위, 특정, greater than, smaller than도 가능; 없으면 전체)
+- equipment_line_id (특정하면 기본으로 equipment_line_id까지 분석)
+- equipment_machine_id (특정하면 기본으로 equipment_machine_id까지 분석)
+- equipment_path_id (특정하면 기본으로 equipment_path_id까지 분석)
+- 위의 equipment를 특정 안하면 equipment_path_id까지 분석 (default)
+
+## 분석 지시사항
+- 일별 dpu는 시작과 끝에서 빈날짜가 있으면 0으로 채운다.
+- heatmap 데이터는 단순 concat이기 때문에 aggregate한다.
+- heatmap 데이터는 duckdb의 pnl_map에서 model_code로 panal_location_info 컬럼을 unique로 가져와서 (이름순) 위에서 aggregate한 값에서 없는 panel_addr가 있다면, 값을 0으로 채워서 전체 panel_map을 완성한다.
