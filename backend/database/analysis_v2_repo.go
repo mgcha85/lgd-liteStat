@@ -15,9 +15,10 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	// Determine Grouping Levels
 	// Determine Grouping Levels
-	// Note: We use 'j' alias because the final select is FROM joined_data j
-	groupByCols := []string{"j.process_code"}
-	selectCols := []string{"j.process_code"}
+	// We need separate lists for CTEs (raw names) and Main Query (aliased with 'j')
+	rawGroupByCols := []string{"process_code"}
+	aliasedGroupByCols := []string{"j.process_code"}
+	aliasedSelectCols := []string{"j.process_code"}
 
 	levels := map[string]int{
 		"process": 0,
@@ -42,24 +43,27 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	targetDepth := levels[targetLevel]
 
 	if targetDepth >= 1 {
-		groupByCols = append(groupByCols, "j.equipment_line_id")
-		selectCols = append(selectCols, "j.equipment_line_id")
+		rawGroupByCols = append(rawGroupByCols, "equipment_line_id")
+		aliasedGroupByCols = append(aliasedGroupByCols, "j.equipment_line_id")
+		aliasedSelectCols = append(aliasedSelectCols, "j.equipment_line_id")
 	} else {
-		selectCols = append(selectCols, "NULL as equipment_line_id")
+		aliasedSelectCols = append(aliasedSelectCols, "NULL as equipment_line_id")
 	}
 
 	if targetDepth >= 2 {
-		groupByCols = append(groupByCols, "j.equipment_machine_id")
-		selectCols = append(selectCols, "j.equipment_machine_id")
+		rawGroupByCols = append(rawGroupByCols, "equipment_machine_id")
+		aliasedGroupByCols = append(aliasedGroupByCols, "j.equipment_machine_id")
+		aliasedSelectCols = append(aliasedSelectCols, "j.equipment_machine_id")
 	} else {
-		selectCols = append(selectCols, "NULL as equipment_machine_id")
+		aliasedSelectCols = append(aliasedSelectCols, "NULL as equipment_machine_id")
 	}
 
 	if targetDepth >= 3 {
-		groupByCols = append(groupByCols, "j.equipment_path_id")
-		selectCols = append(selectCols, "j.equipment_path_id")
+		rawGroupByCols = append(rawGroupByCols, "equipment_path_id")
+		aliasedGroupByCols = append(aliasedGroupByCols, "j.equipment_path_id")
+		aliasedSelectCols = append(aliasedSelectCols, "j.equipment_path_id")
 	} else {
-		selectCols = append(selectCols, "NULL as equipment_path_id")
+		aliasedSelectCols = append(aliasedSelectCols, "NULL as equipment_path_id")
 	}
 
 	// 2. Build WHERE Clause
@@ -179,12 +183,12 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	`,
 		historyPath,
 		strings.Join(whereClauses, " AND "),
-		strings.Join(groupByCols, ", "), // exploded level
-		strings.Join(groupByCols, ", "), // map final level
-		strings.Join(groupByCols, ", "), // dpu level
-		strings.Join(groupByCols, ", "), // dpu agg level
-		strings.Join(selectCols, ", "),
-		strings.Join(groupByCols, ", ")) // main select level
+		strings.Join(rawGroupByCols, ", "),     // exploded level (CTE)
+		strings.Join(rawGroupByCols, ", "),     // map final level (CTE)
+		strings.Join(rawGroupByCols, ", "),     // dpu level (CTE)
+		strings.Join(rawGroupByCols, ", "),     // dpu agg level (CTE)
+		strings.Join(aliasedSelectCols, ", "),  // main select level (j.)
+		strings.Join(aliasedGroupByCols, ", ")) // main select group by (j.)
 
 	log.Printf("Executing Analysis Query: %s [Args: %v]", fullQuery, args)
 
