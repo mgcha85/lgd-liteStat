@@ -103,21 +103,21 @@ func main() {
 		}
 	}
 
-	// Refresh Data Mart (Equipment Stats)
-	log.Println("Building Data Mart (Equipment Rankings)...")
-	go func() {
-		facilities := cfg.Settings.Facilities
-		if len(facilities) == 0 {
-			facilities = []string{"default"}
-		}
-
-		for _, fac := range facilities {
-			if _, err := martBuilder.Refresh(fac); err != nil {
-				log.Printf("Failed to refresh mart for %s: %v", fac, err)
-			}
-		}
-		log.Println("✓ Data Mart Ready")
-	}()
+	// Refresh Data Mart (Equipment Stats) - DISABLED for On-Demand Usage
+	// log.Println("Building Data Mart (Equipment Rankings)...")
+	// go func() {
+	// 	facilities := cfg.Settings.Facilities
+	// 	if len(facilities) == 0 {
+	// 		facilities = []string{"default"}
+	// 	}
+	//
+	// 	for _, fac := range facilities {
+	// 		if _, err := martBuilder.Refresh(fac); err != nil {
+	// 			log.Printf("Failed to refresh mart for %s: %v", fac, err)
+	// 		}
+	// 	}
+	// 	log.Println("✓ Data Mart Ready")
+	// }()
 
 	// Initialize API handler
 	handler := api.NewHandler(db, repo, cfg, martBuilder, analyzer, ingestor)
