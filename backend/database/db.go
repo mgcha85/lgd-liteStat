@@ -101,9 +101,13 @@ func (db *DB) GetAnalyticsDB(facility string) (*sql.DB, error) {
 }
 
 func Initialize(baseDuckPath string, facilities []string, appPath string) (*DB, error) {
-	// baseDuckPath is like /app/data/analytics.duckdb
-	// We extract /app/data as baseDir
-	baseDir := filepath.Dir(baseDuckPath)
+	// Flexible Path Handling:
+	// If baseDuckPath has an extension (e.g. /app/data/analytics.duckdb), assume it's a file and use its parent dir.
+	// If it has no extension (e.g. /app/data), assume it's the base directory.
+	baseDir := baseDuckPath
+	if filepath.Ext(baseDuckPath) != "" {
+		baseDir = filepath.Dir(baseDuckPath)
+	}
 
 	// Initialize SQLite (App DB)
 	appDB, err := sql.Open("sqlite3", appPath)

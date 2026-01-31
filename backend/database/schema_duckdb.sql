@@ -1,12 +1,9 @@
 -- DuckDB Tables (Analytics)
-CREATE SCHEMA IF NOT EXISTS lake_mgr;
 
--- Drop legacy tables/views
-DROP TABLE IF EXISTS lake_mgr.eas_pnl_ins_def_a;
-DROP TABLE IF EXISTS lake_mgr.mas_pnl_prod_eqp_h;
-DROP TABLE IF EXISTS glass_stats;
+-- Drop legacy tables/views if they exist (Cleanup)
 DROP VIEW IF EXISTS inspection;
 DROP VIEW IF EXISTS history;
+DROP TABLE IF EXISTS glass_stats;
 
 -- Mart Table (Still needed for aggregation speed)
 CREATE TABLE IF NOT EXISTS glass_stats (
@@ -21,6 +18,12 @@ CREATE TABLE IF NOT EXISTS glass_stats (
     created_at TIMESTAMP,
     PRIMARY KEY (product_id, defect_name)
 );
+
+-- Ensure columns exist (Migration for existing tables)
+ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS model_code TEXT;
+ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS defect_name TEXT;
+ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS panel_map INTEGER[];
+ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS panel_addrs TEXT[];
 
 -- VIEWS pointing to Parquet Data Lake
 -- Note: hive_partitioning=1 enables auto-discovery of facility_code, year, month columns from path

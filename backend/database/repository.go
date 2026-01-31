@@ -28,27 +28,9 @@ func (r *Repository) CleanupOldAnalysis(days int) error {
 
 // CleanupOldData deletes old inspection and history data
 func (r *Repository) CleanupOldData(days int, facilities []string) error {
-	cutoff := time.Now().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
-
-	for _, fac := range facilities {
-		conn, err := r.db.GetAnalyticsDB(fac)
-		if err != nil {
-			log.Printf("Cleanup: Failed to get DB for %s: %v", fac, err)
-			continue
-		}
-
-		// Delete from history
-		q1 := fmt.Sprintf("DELETE FROM lake_mgr.mas_pnl_prod_eqp_h WHERE move_in_ymdhms < '%s'", cutoff)
-		if _, err := conn.Exec(q1); err != nil {
-			log.Printf("Cleanup: Failed to clean history for %s: %v", fac, err)
-		}
-
-		// Delete from inspection
-		q2 := fmt.Sprintf("DELETE FROM lake_mgr.eas_pnl_ins_def_a WHERE inspection_end_ymdhms < '%s'", cutoff)
-		if _, err := conn.Exec(q2); err != nil {
-			log.Printf("Cleanup: Failed to clean inspection for %s: %v", fac, err)
-		}
-	}
+	// Parquet files are managed by Python Scheduler (Retention Policy).
+	// Backend View is read-only.
+	log.Printf("Cleanup: Skipping DELETE on history/inspection VIEW (Parquet managed by Scheduler). Days cutoff: %d", days)
 	return nil
 }
 
@@ -452,7 +434,7 @@ func (r *Repository) GetEquipmentRankings(start, end time.Time, defectName strin
                        PARTITION BY product_id, process_code, equipment_line_id
                        ORDER BY move_in_ymdhms DESC
                    ) as rn
-            FROM lake_mgr.mas_pnl_prod_eqp_h
+            FROM history
             WHERE 1=1
             %s
         ),
@@ -468,8 +450,8 @@ func (r *Repository) GetEquipmentRankings(start, end time.Time, defectName strin
                 h.product_type_code,
                 COUNT(DISTINCT h.product_id) as product_count,
                 COUNT(DISTINCT i.panel_id) as total_defects
-            FROM filtered_history h
-            LEFT JOIN lake_mgr.eas_pnl_ins_def_a i 
+            FROM history h
+            LEFT JOIN inspection i 
                 ON h.product_id = i.product_id 
                 AND i.process_code = h.process_code
                 %s
@@ -540,7 +522,7 @@ func (r *Repository) GetHistoryCount(facility string) (int64, error) {
 		return 0, err
 	}
 	var count int64
-	if err := conn.QueryRow("SELECT COUNT(*) FROM lake_mgr.mas_pnl_prod_eqp_h").Scan(&count); err != nil {
+	if err := conn.QueryRow("SELECT COUNT(*) FROM history").Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -553,7 +535,7 @@ func (r *Repository) GetLatestImportTimestamp(facility string) (time.Time, error
 		return time.Time{}, err
 	}
 
-	query := "SELECT MAX(move_in_ymdhms) FROM lake_mgr.mas_pnl_prod_eqp_h"
+	query := "SELECT MAX(move_in_ymdhms) FROM history"
 	var t sql.NullTime
 	if err := conn.QueryRow(query).Scan(&t); err != nil {
 		return time.Time{}, err
