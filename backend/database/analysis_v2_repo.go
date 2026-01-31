@@ -14,8 +14,10 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	historyPath := "/app/data/lake/history/**/*.parquet"
 
 	// Determine Grouping Levels
-	groupByCols := []string{"h.process_code"}
-	selectCols := []string{"h.process_code"}
+	// Determine Grouping Levels
+	// Note: We use 'j' alias because the final select is FROM joined_data j
+	groupByCols := []string{"j.process_code"}
+	selectCols := []string{"j.process_code"}
 
 	levels := map[string]int{
 		"process": 0,
@@ -40,22 +42,22 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	targetDepth := levels[targetLevel]
 
 	if targetDepth >= 1 {
-		groupByCols = append(groupByCols, "h.equipment_line_id")
-		selectCols = append(selectCols, "h.equipment_line_id")
+		groupByCols = append(groupByCols, "j.equipment_line_id")
+		selectCols = append(selectCols, "j.equipment_line_id")
 	} else {
 		selectCols = append(selectCols, "NULL as equipment_line_id")
 	}
 
 	if targetDepth >= 2 {
-		groupByCols = append(groupByCols, "h.equipment_machine_id")
-		selectCols = append(selectCols, "h.equipment_machine_id")
+		groupByCols = append(groupByCols, "j.equipment_machine_id")
+		selectCols = append(selectCols, "j.equipment_machine_id")
 	} else {
 		selectCols = append(selectCols, "NULL as equipment_machine_id")
 	}
 
 	if targetDepth >= 3 {
-		groupByCols = append(groupByCols, "h.equipment_path_id")
-		selectCols = append(selectCols, "h.equipment_path_id")
+		groupByCols = append(groupByCols, "j.equipment_path_id")
+		selectCols = append(selectCols, "j.equipment_path_id")
 	} else {
 		selectCols = append(selectCols, "NULL as equipment_path_id")
 	}
