@@ -139,7 +139,7 @@ def main():
                 target_history AS (
                     SELECT 
                         product_id, 
-                        model_code,
+                        product_type_code as model_code,
                         lot_id,
                         move_in_ymdhms
                     FROM read_parquet('{history_root}/**/*.parquet', hive_partitioning=true)
