@@ -1,9 +1,8 @@
 -- DuckDB Tables (Analytics)
 
--- Drop legacy tables/views if they exist (Cleanup)
-DROP VIEW IF EXISTS inspection;
-DROP VIEW IF EXISTS history;
-DROP TABLE IF EXISTS glass_stats;
+-- Views pointing to Parquet Data Lake
+-- Note: Views are generally safe to replace (CREATE OR REPLACE) but tables must NEVER be dropped in this script.
+-- cleanup section removed to prevent data loss.
 
 -- Mart Table (Still needed for aggregation speed)
 CREATE TABLE IF NOT EXISTS glass_stats (
