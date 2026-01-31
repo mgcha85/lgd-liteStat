@@ -127,6 +127,10 @@ def main():
                     SELECT 
                         product_id, 
                         defect_name,
+                        -- Fallback: If model_code column missing, use product_id[2:4] (indices 3,2 in SQL substr)
+                        -- Since we just added model_code to config, existing files don't have it.
+                        -- Safest is to use substr(product_id, 3, 2) derived column.
+                        substr(product_id, 3, 2) as model_code,
                         panel_addr,
                         inspection_end_ymdhms
                     FROM read_parquet([
@@ -139,7 +143,7 @@ def main():
                 target_history AS (
                     SELECT 
                         product_id, 
-                        product_type_code as model_code,
+                        -- Removed product_type_code as requested
                         lot_id,
                         move_in_ymdhms
                     FROM read_parquet('{history_root}/**/*.parquet', hive_partitioning=true)
@@ -149,26 +153,28 @@ def main():
                     SELECT
                         product_id,
                         defect_name,
+                        model_code,
                         panel_addr,
                         COUNT(*) as addr_count
                     FROM target_inspection
                     WHERE panel_addr IS NOT NULL
-                    GROUP BY product_id, defect_name, panel_addr
+                    GROUP BY product_id, defect_name, model_code, panel_addr
                 ),
                 grouped_defects AS (
                     SELECT
                         product_id,
                         defect_name,
+                        model_code,
                         SUM(addr_count) as total_defects,
                         list(panel_addr) as panel_addrs,
                         list(addr_count) as panel_map
                     FROM inner_stats
-                    GROUP BY product_id, defect_name
+                    GROUP BY product_id, defect_name, model_code
                 )
                 SELECT 
                     d.product_id,
                     d.defect_name,
-                    COALESCE(h.model_code, 'UNKNOWN') as model_code,
+                    d.model_code,
                     h.lot_id,
                     CAST(h.move_in_ymdhms AS DATE) as work_date,
                     d.total_defects,
