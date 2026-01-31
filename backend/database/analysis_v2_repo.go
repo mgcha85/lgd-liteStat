@@ -20,6 +20,9 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	aliasedGroupByCols := []string{"j.process_code"}
 	aliasedSelectCols := []string{"j.process_code"}
 
+	// Dynamic CTE Selects (raw names, but with NULLs for missing levels)
+	cteSelectCols := []string{"process_code"}
+
 	levels := map[string]int{
 		"process": 0,
 		"line":    1,
@@ -46,24 +49,30 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		rawGroupByCols = append(rawGroupByCols, "equipment_line_id")
 		aliasedGroupByCols = append(aliasedGroupByCols, "j.equipment_line_id")
 		aliasedSelectCols = append(aliasedSelectCols, "j.equipment_line_id")
+		cteSelectCols = append(cteSelectCols, "equipment_line_id")
 	} else {
 		aliasedSelectCols = append(aliasedSelectCols, "NULL as equipment_line_id")
+		cteSelectCols = append(cteSelectCols, "NULL as equipment_line_id")
 	}
 
 	if targetDepth >= 2 {
 		rawGroupByCols = append(rawGroupByCols, "equipment_machine_id")
 		aliasedGroupByCols = append(aliasedGroupByCols, "j.equipment_machine_id")
 		aliasedSelectCols = append(aliasedSelectCols, "j.equipment_machine_id")
+		cteSelectCols = append(cteSelectCols, "equipment_machine_id")
 	} else {
 		aliasedSelectCols = append(aliasedSelectCols, "NULL as equipment_machine_id")
+		cteSelectCols = append(cteSelectCols, "NULL as equipment_machine_id")
 	}
 
 	if targetDepth >= 3 {
 		rawGroupByCols = append(rawGroupByCols, "equipment_path_id")
 		aliasedGroupByCols = append(aliasedGroupByCols, "j.equipment_path_id")
 		aliasedSelectCols = append(aliasedSelectCols, "j.equipment_path_id")
+		cteSelectCols = append(cteSelectCols, "equipment_path_id")
 	} else {
 		aliasedSelectCols = append(aliasedSelectCols, "NULL as equipment_path_id")
+		cteSelectCols = append(cteSelectCols, "NULL as equipment_path_id")
 	}
 
 	// 2. Build WHERE Clause
@@ -103,6 +112,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	}
 
 	// 3. Construct Query
+	cteSelectStr := strings.Join(cteSelectCols, ", ")
+
 	fullQuery := fmt.Sprintf(`
 		WITH valid_history AS (
 			SELECT * FROM read_parquet('%s', hive_partitioning=true)
@@ -124,19 +135,19 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		),
 		exploded_maps AS (
 			SELECT 
-				process_code, equipment_line_id, equipment_machine_id, equipment_path_id,
+				%s,
 				UNNEST(panel_addrs) as addr,
 				UNNEST(panel_map) as cnt
 			FROM joined_data
 		),
 		map_final AS (
 			SELECT
-				process_code, equipment_line_id, equipment_machine_id, equipment_path_id,
+				%s,
 				list(addr) as panel_addrs,
 				list(panel_cnt) as panel_map
 			FROM (
 				SELECT 
-					process_code, equipment_line_id, equipment_machine_id, equipment_path_id,
+					%s,
 					addr,
 					SUM(cnt) as panel_cnt
 				FROM exploded_maps
@@ -147,7 +158,7 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		),
 		dpu_trend AS (
 			SELECT
-				process_code, equipment_line_id, equipment_machine_id, equipment_path_id,
+				%s,
 				work_date,
 				SUM(total_defects)::DOUBLE / COUNT(DISTINCT product_id) as dpu
 			FROM joined_data
@@ -155,7 +166,7 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		),
 		dpu_agg AS (
 		    SELECT
-		        process_code, equipment_line_id, equipment_machine_id, equipment_path_id,
+		        %s,
 		        to_json(list({'work_date': CAST(work_date as VARCHAR), 'dpu': dpu})) as trend_json
             FROM dpu_trend
             GROUP BY %s
@@ -183,10 +194,15 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	`,
 		historyPath,
 		strings.Join(whereClauses, " AND "),
-		strings.Join(rawGroupByCols, ", "),     // exploded level (CTE)
-		strings.Join(rawGroupByCols, ", "),     // map final level (CTE)
-		strings.Join(rawGroupByCols, ", "),     // dpu level (CTE)
-		strings.Join(rawGroupByCols, ", "),     // dpu agg level (CTE)
+		cteSelectStr,                           // exploded_maps SELECT
+		cteSelectStr,                           // map_final SELECT
+		cteSelectStr,                           // map_final subquery SELECT
+		strings.Join(rawGroupByCols, ", "),     // map_final subquery GROUP BY
+		strings.Join(rawGroupByCols, ", "),     // map_final GROUP BY
+		cteSelectStr,                           // dpu_trend SELECT
+		strings.Join(rawGroupByCols, ", "),     // dpu_trend GROUP BY
+		cteSelectStr,                           // dpu_agg SELECT
+		strings.Join(rawGroupByCols, ", "),     // dpu_agg GROUP BY
 		strings.Join(aliasedSelectCols, ", "),  // main select level (j.)
 		strings.Join(aliasedGroupByCols, ", ")) // main select group by (j.)
 
