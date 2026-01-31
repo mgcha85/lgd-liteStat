@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	_ "github.com/marcboeker/go-duckdb"
@@ -45,7 +46,7 @@ func (db *DB) GetAnalyticsDB(facility string) (*sql.DB, error) {
 	}
 
 	// Construct Path: /app/data/lake/{facility}.duckdb
-	// data/lake directory structure
+	// derived from BaseDir
 	targetPath := filepath.Join(db.BaseDir, "lake", fmt.Sprintf("%s.duckdb", facility))
 
 	// Ensure directory exists (parent of target)
@@ -68,6 +69,29 @@ func (db *DB) GetAnalyticsDB(facility string) (*sql.DB, error) {
 	if err := conn.Ping(); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to ping newly requested DB for %s: %w", facility, err)
+	}
+
+	// EXECUTE SCHEMA (CRITICAL Fix for Lazy Loading)
+	// Since we don't pre-load DBs, we must apply schema here.
+	schemaContent, err := os.ReadFile("database/schema_duckdb.sql")
+	if err != nil {
+		// Try fallback relative path?
+		// Assuming working directory is app root
+		log.Printf("Error: Failed to read schema_duckdb.sql: %v", err)
+	} else {
+		statements := strings.Split(string(schemaContent), ";")
+		for _, stmt := range statements {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			if _, err := conn.Exec(stmt); err != nil {
+				// Don't fail connection, but log error. Schema might be duplicate or invalid.
+				// However, missing views is fatal.
+				log.Printf("Warning: Schema execution error for %s: %v", facility, err)
+			}
+		}
+		log.Printf("Applied schema to %s", facility)
 	}
 
 	// Store in map
