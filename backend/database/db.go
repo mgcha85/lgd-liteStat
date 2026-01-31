@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 
 	_ "github.com/marcboeker/go-duckdb"
 	_ "github.com/mattn/go-sqlite3"
@@ -13,101 +14,74 @@ import (
 
 type DB struct {
 	// Analytics is now a map of Facility -> *sql.DB
-	// If no facility is specified or for backward compatibility, "default" key can be used
 	Analytics map[string]*sql.DB
-	App       *sql.DB // SQLite for job tracking/cache
+	mu        sync.RWMutex // Protects Analytics map
+	BaseDir   string       // Base directory for data (e.g. /app/data)
+	App       *sql.DB      // SQLite for job tracking/cache
 }
 
 // GetAnalyticsDB returns the DuckDB connection for a specific facility.
-// If facility is empty, it returns the default connection if available.
+// It uses lazy loading: if connection doesn't exist, it attempts to open it.
 func (db *DB) GetAnalyticsDB(facility string) (*sql.DB, error) {
 	if facility == "" {
-		// Fallback to first available or specific default?
-		// For now, let's look for "default" or return error
-		if conn, ok := db.Analytics["default"]; ok {
-			return conn, nil
-		}
-		// Fallback: return any random one (not ideal) or error
-		// Let's assume there's always a "default" based on Initialization
-		return nil, fmt.Errorf("no facility specified and no default connection")
+		return nil, fmt.Errorf("no facility specified")
 	}
+
+	// 1. Fast Path: Check with Read Lock
+	db.mu.RLock()
+	if conn, ok := db.Analytics[facility]; ok {
+		db.mu.RUnlock()
+		return conn, nil
+	}
+	db.mu.RUnlock()
+
+	// 2. Slow Path: Connect with Write Lock
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	// Double check in case another goroutine connected while we waited for lock
 	if conn, ok := db.Analytics[facility]; ok {
 		return conn, nil
 	}
-	return nil, fmt.Errorf("connection for facility '%s' not found", facility)
+
+	// Construct Path: /app/data/lake/{facility}.duckdb
+	// data/lake directory structure
+	targetPath := filepath.Join(db.BaseDir, "lake", fmt.Sprintf("%s.duckdb", facility))
+
+	// Ensure directory exists (parent of target)
+	dir := filepath.Dir(targetPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+
+	log.Printf("Facility %s: lazy connecting to DB path %s", facility, targetPath)
+
+	conn, err := sql.Open("duckdb", targetPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open newly requested DB for %s: %w", facility, err)
+	}
+
+	// Set connection settings
+	if _, err := conn.Exec("PRAGMA threads=4"); err != nil {
+		log.Printf("Warning: Failed to set threads for %s: %v", targetPath, err)
+	}
+	if err := conn.Ping(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to ping newly requested DB for %s: %w", facility, err)
+	}
+
+	// Store in map
+	db.Analytics[facility] = conn
+
+	return conn, nil
 }
 
 func Initialize(baseDuckPath string, facilities []string, appPath string) (*DB, error) {
-	analyticsDBs := make(map[string]*sql.DB)
+	// baseDuckPath is like /app/data/analytics.duckdb
+	// We extract /app/data as baseDir
+	baseDir := filepath.Dir(baseDuckPath)
 
-	// Helper to open DuckDB
-	openDuck := func(path string) (*sql.DB, error) {
-		// Ensure directory exists
-		dir := filepath.Dir(path)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
-		}
-
-		db, err := sql.Open("duckdb", path)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := db.Exec("PRAGMA threads=4"); err != nil {
-			log.Printf("Warning: Failed to set threads for %s: %v", path, err)
-		}
-		if err := db.Ping(); err != nil {
-			return nil, err
-		}
-		return db, nil
-	}
-
-	// 1. Initialize Analytics DBs
-	// Case A: No facilities configured -> Legacy/Default mode
-	if len(facilities) == 0 {
-		db, err := openDuck(baseDuckPath)
-		if err != nil {
-			return nil, err
-		}
-		analyticsDBs["default"] = db
-	} else {
-		// Case B: Facilities configured -> data/lake/{facility}.duckdb (Priority)
-		// We use baseDir from baseDuckPath (e.g. /app/data)
-		baseDir := filepath.Dir(baseDuckPath)
-
-		for _, fac := range facilities {
-			// Priority 1: data/lake/{fac}.duckdb (User specified)
-			pathLake := filepath.Join(baseDir, "lake", fmt.Sprintf("%s.duckdb", fac))
-			// Priority 2: data/{fac}/duck.db (Previous Folder structure)
-			pathFolder := filepath.Join(baseDir, fac, "duck.db")
-
-			var targetPath string
-
-			if _, err := os.Stat(pathLake); err == nil {
-				targetPath = pathLake
-			} else if _, err := os.Stat(pathFolder); err == nil {
-				targetPath = pathFolder
-			} else {
-				// Default to Lake structure
-				targetPath = pathLake
-			}
-
-			log.Printf("Facility %s: using DB path %s", fac, targetPath)
-
-			db, err := openDuck(targetPath)
-			if err != nil {
-				// Warn but continue? Or fail? Fail is safer.
-				return nil, fmt.Errorf("failed to open DB for facility %s: %w", fac, err)
-			}
-			analyticsDBs[fac] = db
-		}
-
-		// If we want a default fall back to first facility for ease of use?
-		if len(analyticsDBs) > 0 {
-			analyticsDBs["default"] = analyticsDBs[facilities[0]]
-		}
-	}
-
-	// 2. Initialize SQLite (App DB)
+	// Initialize SQLite (App DB)
 	appDB, err := sql.Open("sqlite3", appPath)
 	if err != nil {
 		return nil, err
@@ -120,12 +94,16 @@ func Initialize(baseDuckPath string, facilities []string, appPath string) (*DB, 
 	}
 
 	return &DB{
-		Analytics: analyticsDBs,
+		Analytics: make(map[string]*sql.DB),
+		BaseDir:   baseDir,
 		App:       appDB,
 	}, nil
 }
 
 func (db *DB) Close() {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
 	for _, conn := range db.Analytics {
 		conn.Close()
 	}
