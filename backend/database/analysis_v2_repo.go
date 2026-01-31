@@ -87,7 +87,7 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	// Date Range
 	if params.Start != "" && params.End != "" {
-		whereClauses = append(whereClauses, "g.work_date BETWEEN ? AND ?")
+		whereClauses = append(whereClauses, "g.work_date BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)")
 		args = append(args, params.Start, params.End)
 	}
 
