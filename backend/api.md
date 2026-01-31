@@ -15,7 +15,7 @@
 *   `facility` (필수): 설비 코드 (예: "A1")
 *   `start`, `end`: 분석 기간 (YYYY-MM-DD)
 *   `model_code`: 모델 코드 (필수)
-*   `defect_name`: (옵션) 특정 불량만 필터링
+*   `defect_name`: 불량 명 (필수) - 특정 불량만 분석
 *   `analysis_level`: 집계 레벨 (`process`, `line`, `machine`, `path`)
 
 ### Curl 예시
@@ -28,6 +28,7 @@ curl -X POST http://localhost:8082/api/analyze/hierarchy \
     "start": "2023-10-01",
     "end": "2023-10-02",
     "model_code": "M1",
+    "defect_name": "Open",
     "analysis_level": "machine"
   }'
 

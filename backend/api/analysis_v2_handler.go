@@ -21,10 +21,10 @@ func (h *Handler) AnalyzeHierarchyHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Facility is required", http.StatusBadRequest)
 		return
 	}
-	// "ProductIDs" OR ("Start" + "End" + "ModelCode")
+	// "ProductIDs" OR ("Start" + "End" + "ModelCode" + "DefectName")
 	if len(params.ProductIDs) == 0 {
-		if params.Start == "" || params.End == "" || params.ModelCode == "" {
-			http.Error(w, "Either product_ids OR (start, end, model_code) must be provided", http.StatusBadRequest)
+		if params.Start == "" || params.End == "" || params.ModelCode == "" || params.DefectName == "" {
+			http.Error(w, "Either product_ids OR (start, end, model_code, defect_name) must be provided", http.StatusBadRequest)
 			return
 		}
 	}
