@@ -243,8 +243,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		map_final AS (
 			SELECT
 				%s,
-				list(addr) as panel_addrs,
-				list(panel_cnt) as panel_map
+				to_json(list(addr)) as panel_addrs,
+				to_json(list(panel_cnt)) as panel_map
 			FROM (
 				SELECT 
 					%s,
