@@ -134,22 +134,65 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		args = append(args, params.EquipmentMachineID)
 	}
 
-	// --- DEBUG: Verify Filters ---
 	// Get Connection Early for Debugging
 	conn, err := db.GetAnalyticsDB(params.Facility)
 	if err != nil {
 		return nil, err
 	}
 
-	debugQuery := fmt.Sprintf("SELECT COUNT(*) FROM glass_stats g WHERE %s", strings.Join(whereClauses, " AND "))
-	log.Printf("[DEBUG] Checking Source Data: %s Args: %v", debugQuery, args)
-
-	// Use the connection
-	var sourceCount int
-	if err := conn.QueryRow(debugQuery, args...).Scan(&sourceCount); err != nil {
-		log.Printf("[DEBUG] Failed to count source rows: %v", err)
+	// --- DEBUG: Granular Verification ---
+	// 0. Check DB Connection & Total Count
+	var totalCount int
+	if err := conn.QueryRow("SELECT COUNT(*) FROM glass_stats").Scan(&totalCount); err != nil {
+		log.Printf("[DEBUG] FATAL: Could not query glass_stats: %v", err)
 	} else {
-		log.Printf("[DEBUG] Filtered Source Rows: %d", sourceCount)
+		log.Printf("[DEBUG] Total Rows in glass_stats: %d", totalCount)
+	}
+
+	// 1. Check Date Match
+	var dateCount int
+	// Re-construct filter args independently for debug
+	// Date
+	dateFilter := fmt.Sprintf("%s BETWEEN CAST(? AS DATE) AND CAST(? AS TIMESTAMP)", "g.inspection_time")
+	if params.DateType == "work" {
+		dateFilter = "CAST(g.work_time AS DATE) BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)"
+	} else {
+		dateFilter = "CAST(g.inspection_time AS DATE) BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)"
+	}
+	if err := conn.QueryRow("SELECT COUNT(*) FROM glass_stats g WHERE "+dateFilter, params.Start, params.End).Scan(&dateCount); err != nil {
+		log.Printf("[DEBUG] Date Filter Error: %v", err)
+	} else {
+		log.Printf("[DEBUG] Rows matching Date [%s ~ %s]: %d", params.Start, params.End, dateCount)
+	}
+
+	// 2. Check Model Match
+	if params.ModelCode != "" {
+		var modelCount int
+		if err := conn.QueryRow("SELECT COUNT(*) FROM glass_stats g WHERE g.model_code = ?", params.ModelCode).Scan(&modelCount); err != nil {
+			log.Printf("[DEBUG] Model Filter Error: %v", err)
+		} else {
+			log.Printf("[DEBUG] Rows matching Model [%s]: %d", params.ModelCode, modelCount)
+		}
+	}
+
+	// 3. Check Defect Match
+	if params.DefectName != "" {
+		var defectCount int
+		normalizedDefect := norm.NFC.String(params.DefectName)
+		if err := conn.QueryRow("SELECT COUNT(*) FROM glass_stats g WHERE g.defect_name = ?", normalizedDefect).Scan(&defectCount); err != nil {
+			log.Printf("[DEBUG] Defect Filter Error: %v", err)
+		} else {
+			log.Printf("[DEBUG] Rows matching Defect [%s]: %d", normalizedDefect, defectCount)
+		}
+	}
+
+	// 4. Combined (Original debug)
+	debugQuery := fmt.Sprintf("SELECT COUNT(*) FROM glass_stats g WHERE %s", strings.Join(whereClauses, " AND "))
+	var finalCount int
+	if err := conn.QueryRow(debugQuery, args...).Scan(&finalCount); err != nil {
+		log.Printf("[DEBUG] Failed to count combined rows: %v", err)
+	} else {
+		log.Printf("[DEBUG] COMBINED Filtered Source Rows: %d", finalCount)
 	}
 	// -----------------------------
 
