@@ -77,32 +77,33 @@ type AnalysisMetrics struct {
 
 // AnalysisParamsV2 defines the request body for hierarchy analysis
 type AnalysisParamsV2 struct {
-	Facility           string   `json:"facility"`            // Required
-	Start              string   `json:"start"`               // YYYY-MM-DD
-	End                string   `json:"end"`                 // YYYY-MM-DD
-	ProductIDs         []string `json:"product_ids"`         // Optional (If set, ignores Date/Model)
-	DefectName         string   `json:"defect_name"`         // Optional (Filter specific defect)
-	ModelCode          string   `json:"model_code"`          // Required if ProductIDs empty
-	ProcessCode        string   `json:"process_code"`        // Optional
+	Facility           string   `json:"facility"`             // Required
+	Start              string   `json:"start"`                // YYYY-MM-DD
+	End                string   `json:"end"`                  // YYYY-MM-DD
+	ProductIDs         []string `json:"product_ids"`          // Optional (If set, ignores Date/Model)
+	DefectName         string   `json:"defect_name"`          // Optional (Filter specific defect)
+	ModelCode          string   `json:"model_code"`           // Required if ProductIDs empty
+	ProcessCode        string   `json:"process_code"`         // Optional
 	EquipmentLineID    string   `json:"equipment_line_id"`    // Optional
 	EquipmentMachineID string   `json:"equipment_machine_id"` // Optional
 	EquipmentPathID    string   `json:"equipment_path_id"`    // Optional
-	AnalysisLevel      string   `json:"analysis_level"`      // "line", "machine", "path" (Default: determine by params)
+	AnalysisLevel      string   `json:"analysis_level"`       // "line", "machine", "path" (Default: determine by params)
+	DateType           string   `json:"date_type"`            // "inspection" (default) or "work"
 }
 
 // HierarchyResult represents the aggregated result for a specific hierarchy node
 type HierarchyResult struct {
-	ProcessCode        string  `json:"process_code"`
-	EquipmentLineID    string  `json:"equipment_line_id,omitempty"`
-	EquipmentMachineID string  `json:"equipment_machine_id,omitempty"`
-	EquipmentPathID    string  `json:"equipment_path_id,omitempty"`
-	
-	TotalDefects       int     `json:"total_defects"`
-	TotalProducts      int     `json:"total_products"`
-	DPU                float64 `json:"dpu"`
-	PanelMap           []int   `json:"panel_map"`   // Aggregated Defect Map
-	PanelAddrs         []string `json:"panel_addrs"` // Reference Addrs (Full Grid)
-	
+	ProcessCode        string `json:"process_code"`
+	EquipmentLineID    string `json:"equipment_line_id,omitempty"`
+	EquipmentMachineID string `json:"equipment_machine_id,omitempty"`
+	EquipmentPathID    string `json:"equipment_path_id,omitempty"`
+
+	TotalDefects  int      `json:"total_defects"`
+	TotalProducts int      `json:"total_products"`
+	DPU           float64  `json:"dpu"`
+	PanelMap      []int    `json:"panel_map"`   // Aggregated Defect Map
+	PanelAddrs    []string `json:"panel_addrs"` // Reference Addrs (Full Grid)
+
 	// Daily DPU Trend
 	DailyDPU []DailyDPUItem `json:"daily_dpu"`
 }

@@ -86,7 +86,22 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	// Date Range
 	if params.Start != "" && params.End != "" {
-		whereClauses = append(whereClauses, "g.work_date BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)")
+		dateCol := "g.inspection_time" // Default
+		if params.DateType == "work" {
+			dateCol = "g.work_date"
+		}
+		whereClauses = append(whereClauses, fmt.Sprintf("%s BETWEEN CAST(? AS DATE) AND CAST(? AS TIMESTAMP)", dateCol))
+
+		// Note: work_date is DATE, inspection_time is TIMESTAMP.
+		// If inspection_time, we might need to cast range start/end to TIMESTAMP or cast col to DATE.
+		// Let's safe cast the column to DATE for comparison to match YYYY-MM-DD input.
+		if params.DateType == "work" {
+			whereClauses[len(whereClauses)-1] = "g.work_date BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)"
+		} else {
+			// inspection_time is TIMESTAMP. Input is YYYY-MM-DD.
+			// CAST(inspection_time AS DATE) BETWEEN ? AND ?
+			whereClauses[len(whereClauses)-1] = "CAST(g.inspection_time AS DATE) BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)"
+		}
 		args = append(args, params.Start, params.End)
 	}
 
