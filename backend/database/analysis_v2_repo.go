@@ -128,6 +128,25 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	// 3. Construct Query
 	cteSelectStr := strings.Join(cteSelectCols, ", ")
 
+	// Build Dynamic Join Conditions
+	var joinConditions []string
+	joinConditions = append(joinConditions, "(j.process_code IS NOT DISTINCT FROM mf.process_code)")
+
+	if targetDepth >= 1 {
+		joinConditions = append(joinConditions, "(j.equipment_line_id IS NOT DISTINCT FROM mf.equipment_line_id)")
+	}
+	if targetDepth >= 2 {
+		joinConditions = append(joinConditions, "(j.equipment_machine_id IS NOT DISTINCT FROM mf.equipment_machine_id)")
+	}
+	if targetDepth >= 3 {
+		joinConditions = append(joinConditions, "(j.equipment_path_id IS NOT DISTINCT FROM mf.equipment_path_id)")
+	}
+
+	joinClause := strings.Join(joinConditions, " AND ")
+
+	// DPU Agg Join (Same conditions)
+	dpuJoinClause := strings.ReplaceAll(joinClause, "mf.", "da.")
+
 	fullQuery := fmt.Sprintf(`
 		WITH joined_data AS (
 			SELECT 
@@ -190,16 +209,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 			mf.panel_map,
 			da.trend_json
 		FROM joined_data j
-		LEFT JOIN map_final mf ON 
-			(j.process_code IS NOT DISTINCT FROM mf.process_code) AND
-			(j.equipment_line_id IS NOT DISTINCT FROM mf.equipment_line_id) AND
-			(j.equipment_machine_id IS NOT DISTINCT FROM mf.equipment_machine_id) AND
-			(j.equipment_path_id IS NOT DISTINCT FROM mf.equipment_path_id)
-        LEFT JOIN dpu_agg da ON 
-			(j.process_code IS NOT DISTINCT FROM da.process_code) AND
-			(j.equipment_line_id IS NOT DISTINCT FROM da.equipment_line_id) AND
-			(j.equipment_machine_id IS NOT DISTINCT FROM da.equipment_machine_id) AND
-			(j.equipment_path_id IS NOT DISTINCT FROM da.equipment_path_id)
+		LEFT JOIN map_final mf ON %s
+        LEFT JOIN dpu_agg da ON %s
 		GROUP BY %s, mf.panel_addrs, mf.panel_map, da.trend_json
 	`,
 		strings.Join(whereClauses, " AND "),
@@ -213,6 +224,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		cteSelectStr,                           // dpu_agg SELECT
 		strings.Join(rawGroupByCols, ", "),     // dpu_agg GROUP BY
 		strings.Join(aliasedSelectCols, ", "),  // main select level (j.)
+		joinClause,                             // Dynamic JOIN mf
+		dpuJoinClause,                          // Dynamic JOIN da
 		strings.Join(aliasedGroupByCols, ", ")) // main select group by (j.)
 
 	log.Printf("Executing Analysis Query: %s [Args: %v]", fullQuery, args)
