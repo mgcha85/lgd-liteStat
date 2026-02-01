@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // AnalyzeHierarchy executes the hierarchical analysis query
@@ -80,6 +82,7 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	// Validate Model Code (Required per spec)
 	if params.ModelCode != "" {
+		log.Printf("[DEBUG] ModelCode Raw: %q Hex: %x", params.ModelCode, []byte(params.ModelCode))
 		whereClauses = append(whereClauses, "g.model_code = ?")
 		args = append(args, params.ModelCode)
 	}
@@ -107,8 +110,14 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	// Defect Name
 	if params.DefectName != "" {
+		// Normalize to NFC (standard for Linux/Golang/DuckDB)
+		normalizedDefect := norm.NFC.String(params.DefectName)
+		log.Printf("[DEBUG] DefectName Raw: %q Hex: %x | Normalized: %q Hex: %x",
+			params.DefectName, []byte(params.DefectName),
+			normalizedDefect, []byte(normalizedDefect))
+
 		whereClauses = append(whereClauses, "g.defect_name = ?")
-		args = append(args, params.DefectName)
+		args = append(args, normalizedDefect)
 	}
 
 	// Filters on Hierarchy (Now in glass_stats)
