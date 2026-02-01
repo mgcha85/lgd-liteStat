@@ -125,6 +125,25 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		args = append(args, params.EquipmentMachineID)
 	}
 
+	// --- DEBUG: Verify Filters ---
+	// Get Connection Early for Debugging
+	conn, err := db.GetAnalyticsDB(params.Facility)
+	if err != nil {
+		return nil, err
+	}
+
+	debugQuery := fmt.Sprintf("SELECT COUNT(*) FROM glass_stats g WHERE %s", strings.Join(whereClauses, " AND "))
+	log.Printf("[DEBUG] Checking Source Data: %s Args: %v", debugQuery, args)
+
+	// Use the connection
+	var sourceCount int
+	if err := conn.QueryRow(debugQuery, args...).Scan(&sourceCount); err != nil {
+		log.Printf("[DEBUG] Failed to count source rows: %v", err)
+	} else {
+		log.Printf("[DEBUG] Filtered Source Rows: %d", sourceCount)
+	}
+	// -----------------------------
+
 	// 3. Construct Query
 	cteSelectStr := strings.Join(cteSelectCols, ", ")
 
@@ -229,11 +248,6 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		strings.Join(aliasedGroupByCols, ", ")) // main select group by (j.)
 
 	log.Printf("Executing Analysis Query: %s [Args: %v]", fullQuery, args)
-
-	conn, err := db.GetAnalyticsDB(params.Facility)
-	if err != nil {
-		return nil, err
-	}
 
 	rows, err := conn.Query(fullQuery, args...)
 	if err != nil {
