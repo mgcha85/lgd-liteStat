@@ -10,8 +10,7 @@ import (
 // AnalyzeHierarchy executes the hierarchical analysis query
 func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, error) {
 	// 1. Build Base Query
-	// We need to join glass_stats with history parquet
-	historyPath := "/app/data/lake/history/**/*.parquet"
+	// We query directly from glass_stats (Pre-aggregated Mart)
 
 	// Determine Grouping Levels
 	// Determine Grouping Levels
@@ -97,17 +96,17 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		args = append(args, params.DefectName)
 	}
 
-	// Filters on History (Optimization: Pushdown)
+	// Filters on Hierarchy (Now in glass_stats)
 	if params.ProcessCode != "" {
-		whereClauses = append(whereClauses, "h.process_code = ?")
+		whereClauses = append(whereClauses, "g.process_code = ?")
 		args = append(args, params.ProcessCode)
 	}
 	if params.EquipmentLineID != "" {
-		whereClauses = append(whereClauses, "h.equipment_line_id = ?")
+		whereClauses = append(whereClauses, "g.equipment_line_id = ?")
 		args = append(args, params.EquipmentLineID)
 	}
 	if params.EquipmentMachineID != "" {
-		whereClauses = append(whereClauses, "h.equipment_machine_id = ?")
+		whereClauses = append(whereClauses, "g.equipment_machine_id = ?")
 		args = append(args, params.EquipmentMachineID)
 	}
 
@@ -115,22 +114,18 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	cteSelectStr := strings.Join(cteSelectCols, ", ")
 
 	fullQuery := fmt.Sprintf(`
-		WITH valid_history AS (
-			SELECT * FROM read_parquet('%s', hive_partitioning=true)
-		),
-		joined_data AS (
+		WITH joined_data AS (
 			SELECT 
 				g.product_id,
 				g.total_defects,
 				g.panel_map,
 				g.panel_addrs,
 				g.work_date,
-				h.process_code,
-				h.equipment_line_id,
-				h.equipment_machine_id,
-				h.equipment_path_id
+				g.process_code,
+				g.equipment_line_id,
+				g.equipment_machine_id,
+				g.equipment_path_id
 			FROM glass_stats g
-			JOIN valid_history h ON g.product_id = h.product_id
 			WHERE %s
 		),
 		exploded_maps AS (
@@ -192,7 +187,6 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 			(j.equipment_path_id IS NOT DISTINCT FROM da.equipment_path_id)
 		GROUP BY %s, mf.panel_addrs, mf.panel_map, da.trend_json
 	`,
-		historyPath,
 		strings.Join(whereClauses, " AND "),
 		cteSelectStr,                           // exploded_maps SELECT
 		cteSelectStr,                           // map_final SELECT
@@ -223,8 +217,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	for rows.Next() {
 		var r HierarchyResult
 
-		var panelMapStr string
-		var panelAddrsStr string
+		var panelMapStr sql.NullString
+		var panelAddrsStr sql.NullString
 		var trendJson string
 
 		var eqLine sql.NullString

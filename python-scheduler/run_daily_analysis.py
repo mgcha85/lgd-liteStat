@@ -73,12 +73,28 @@ def main():
                 model_code TEXT,
                 lot_id TEXT,
                 work_date DATE,
+                inspection_time TIMESTAMP,
+                process_code TEXT,
+                equipment_line_id TEXT,
+                equipment_machine_id TEXT,
+                equipment_path_id TEXT,
                 total_defects INTEGER,
                 panel_map INTEGER[], 
                 panel_addrs TEXT[],
                 created_at TIMESTAMP,
                 PRIMARY KEY (product_id, defect_name)
-            )
+            );
+            
+            -- Parsing Logic Migration: Ensure columns exist if table was created previously
+            ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS defect_name TEXT;
+            ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS model_code TEXT;
+            ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS inspection_time TIMESTAMP;
+            ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS process_code TEXT;
+            ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS equipment_line_id TEXT;
+            ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS equipment_machine_id TEXT;
+            ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS equipment_path_id TEXT;
+            ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS panel_map INTEGER[];
+            ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS panel_addrs TEXT[];
         """)
 
         curr = start_date
@@ -120,7 +136,8 @@ def main():
 
             query = f"""
                 INSERT INTO glass_stats (
-                    product_id, defect_name, model_code, lot_id, work_date, 
+                    product_id, defect_name, model_code, lot_id, work_date, inspection_time,
+                    process_code, equipment_line_id, equipment_machine_id, equipment_path_id,
                     total_defects, panel_map, panel_addrs, created_at
                 )
                 WITH target_inspection AS (
@@ -145,7 +162,11 @@ def main():
                         product_id, 
                         -- Removed product_type_code as requested
                         lot_id,
-                        move_in_ymdhms
+                        move_in_ymdhms,
+                        process_code,
+                        equipment_line_id,
+                        equipment_machine_id,
+                        equipment_path_id
                     FROM read_parquet('{history_root}/**/*.parquet', hive_partitioning=true)
                     WHERE facility_code = '{facility}'
                 ),
@@ -154,6 +175,7 @@ def main():
                         product_id,
                         defect_name,
                         model_code,
+                        MAX(inspection_end_ymdhms) as inspection_end_ymdhms,
                         panel_addr,
                         COUNT(*) as addr_count
                     FROM target_inspection
@@ -165,6 +187,7 @@ def main():
                         product_id,
                         defect_name,
                         model_code,
+                        MAX(inspection_end_ymdhms) as inspection_time,
                         SUM(addr_count) as total_defects,
                         list(panel_addr) as panel_addrs,
                         list(addr_count) as panel_map
@@ -177,16 +200,26 @@ def main():
                     d.model_code,
                     h.lot_id,
                     CAST(h.move_in_ymdhms AS DATE) as work_date,
+                    d.inspection_time,
+                    h.process_code,
+                    h.equipment_line_id,
+                    h.equipment_machine_id,
+                    h.equipment_path_id,
                     d.total_defects,
                     d.panel_map,
                     d.panel_addrs,
                     now() as created_at
                 FROM grouped_defects d
                 LEFT JOIN target_history h ON d.product_id = h.product_id
-                ORDER BY d.model_code, d.defect_name, d.product_id
+                ORDER BY d.product_id, d.defect_name
                 ON CONFLICT (product_id, defect_name) DO UPDATE SET 
                     model_code = EXCLUDED.model_code,
                     lot_id = EXCLUDED.lot_id,
+                    inspection_time = EXCLUDED.inspection_time,
+                    process_code = EXCLUDED.process_code,
+                    equipment_line_id = EXCLUDED.equipment_line_id,
+                    equipment_machine_id = EXCLUDED.equipment_machine_id,
+                    equipment_path_id = EXCLUDED.equipment_path_id,
                     total_defects = glass_stats.total_defects + EXCLUDED.total_defects,
                     panel_map = list_concat(glass_stats.panel_map, EXCLUDED.panel_map),
                     panel_addrs = list_concat(glass_stats.panel_addrs, EXCLUDED.panel_addrs),
