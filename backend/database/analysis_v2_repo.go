@@ -88,15 +88,15 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	if params.Start != "" && params.End != "" {
 		dateCol := "g.inspection_time" // Default
 		if params.DateType == "work" {
-			dateCol = "g.work_date"
+			dateCol = "g.work_time"
 		}
 		whereClauses = append(whereClauses, fmt.Sprintf("%s BETWEEN CAST(? AS DATE) AND CAST(? AS TIMESTAMP)", dateCol))
 
-		// Note: work_date is DATE, inspection_time is TIMESTAMP.
+		// Note: work_time is TIMESTAMP, inspection_time is TIMESTAMP.
 		// If inspection_time, we might need to cast range start/end to TIMESTAMP or cast col to DATE.
 		// Let's safe cast the column to DATE for comparison to match YYYY-MM-DD input.
 		if params.DateType == "work" {
-			whereClauses[len(whereClauses)-1] = "g.work_date BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)"
+			whereClauses[len(whereClauses)-1] = "CAST(g.work_time AS DATE) BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)"
 		} else {
 			// inspection_time is TIMESTAMP. Input is YYYY-MM-DD.
 			// CAST(inspection_time AS DATE) BETWEEN ? AND ?
@@ -135,7 +135,7 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 				g.total_defects,
 				g.panel_map,
 				g.panel_addrs,
-				g.work_date,
+				g.work_time,
 				g.process_code,
 				g.equipment_line_id,
 				g.equipment_machine_id,
@@ -169,10 +169,10 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		dpu_trend AS (
 			SELECT
 				%s,
-				work_date,
+				CAST(work_time AS DATE) as work_date,
 				SUM(total_defects)::DOUBLE / COUNT(DISTINCT product_id) as dpu
 			FROM joined_data
-			GROUP BY %s, work_date
+			GROUP BY %s, CAST(work_time AS DATE)
 		),
 		dpu_agg AS (
 		    SELECT

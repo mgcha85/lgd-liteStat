@@ -72,7 +72,7 @@ def main():
                 defect_name TEXT,
                 model_code TEXT,
                 lot_id TEXT,
-                work_date DATE,
+                work_time TIMESTAMP,
                 inspection_time TIMESTAMP,
                 process_code TEXT,
                 equipment_line_id TEXT,
@@ -89,6 +89,7 @@ def main():
             ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS defect_name TEXT;
             ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS model_code TEXT;
             ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS inspection_time TIMESTAMP;
+            ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS work_time TIMESTAMP;
             ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS process_code TEXT;
             ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS equipment_line_id TEXT;
             ALTER TABLE glass_stats ADD COLUMN IF NOT EXISTS equipment_machine_id TEXT;
@@ -136,7 +137,7 @@ def main():
 
             query = f"""
                 INSERT INTO glass_stats (
-                    product_id, defect_name, model_code, lot_id, work_date, inspection_time,
+                    product_id, defect_name, model_code, lot_id, work_time, inspection_time,
                     process_code, equipment_line_id, equipment_machine_id, equipment_path_id,
                     total_defects, panel_map, panel_addrs, created_at
                 )
@@ -199,7 +200,7 @@ def main():
                     d.defect_name,
                     d.model_code,
                     h.lot_id,
-                    CAST(h.move_in_ymdhms AS DATE) as work_date,
+                    h.move_in_ymdhms as work_time,
                     d.inspection_time,
                     h.process_code,
                     h.equipment_line_id,

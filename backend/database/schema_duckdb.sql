@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS glass_stats (
     defect_name TEXT,
     model_code TEXT,
     lot_id TEXT,
-    work_date DATE,
+    work_time TIMESTAMP,
     inspection_time TIMESTAMP,
     process_code TEXT,
     equipment_line_id TEXT,
