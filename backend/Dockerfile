@@ -1,20 +1,23 @@
 # Stage 1: Builder
 FROM docker.io/library/golang:1.24-bookworm AS builder
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y gcc g++ make
+# Install build dependencies including Apache Arrow C++
+RUN apt-get update && apt-get install -y gcc g++ make ca-certificates lsb-release wget \
+    && wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb \
+    && apt-get install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb \
+    && apt-get update \
+    && apt-get install -y -V libarrow-dev
 
 WORKDIR /build
 
-# Copy go mod files
+# Copy go mod files first for caching
 COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
 COPY . .
 
-# Build the application (Dynamic linking is fine on Debian)
-# We remove -tags musl and static flags
+# Build the application
 RUN CGO_ENABLED=1 GOOS=linux go build -o lgd-litestat main.go
 
 # Stage 2: Runtime

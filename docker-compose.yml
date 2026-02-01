@@ -14,7 +14,7 @@ services:
     environment:
       - DB_PATH=/app/data/analytics.duckdb
       - CGO_ENABLED=1
-    command: sh -c "apt-get update && apt-get install -y gcc g++ make && go mod download && go run main.go"
+    command: sh -c "apt-get update && apt-get install -y gcc g++ make libarrow-dev && go run -mod=vendor main.go"
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8082/health" ]
