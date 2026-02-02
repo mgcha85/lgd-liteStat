@@ -18,8 +18,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 	// Determine Grouping Levels
 	// We need separate lists for CTEs (raw names) and Main Query (aliased with 'j')
 	rawGroupByCols := []string{"process_code"}
-	aliasedGroupByCols := []string{"j.process_code"}
-	aliasedSelectCols := []string{"j.process_code"}
+	aliasedGroupByCols := []string{"p.process_code"}
+	aliasedSelectCols := []string{"p.process_code"}
 
 	// Dynamic CTE Selects (raw names, but with NULLs for missing levels)
 	cteSelectCols := []string{"process_code"}
@@ -48,8 +48,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	if targetDepth >= 1 {
 		rawGroupByCols = append(rawGroupByCols, "equipment_line_id")
-		aliasedGroupByCols = append(aliasedGroupByCols, "j.equipment_line_id")
-		aliasedSelectCols = append(aliasedSelectCols, "j.equipment_line_id")
+		aliasedGroupByCols = append(aliasedGroupByCols, "p.equipment_line_id")
+		aliasedSelectCols = append(aliasedSelectCols, "p.equipment_line_id")
 		cteSelectCols = append(cteSelectCols, "equipment_line_id")
 	} else {
 		aliasedSelectCols = append(aliasedSelectCols, "NULL as equipment_line_id")
@@ -58,8 +58,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	if targetDepth >= 2 {
 		rawGroupByCols = append(rawGroupByCols, "equipment_machine_id")
-		aliasedGroupByCols = append(aliasedGroupByCols, "j.equipment_machine_id")
-		aliasedSelectCols = append(aliasedSelectCols, "j.equipment_machine_id")
+		aliasedGroupByCols = append(aliasedGroupByCols, "p.equipment_machine_id")
+		aliasedSelectCols = append(aliasedSelectCols, "p.equipment_machine_id")
 		cteSelectCols = append(cteSelectCols, "equipment_machine_id")
 	} else {
 		aliasedSelectCols = append(aliasedSelectCols, "NULL as equipment_machine_id")
@@ -68,8 +68,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	if targetDepth >= 3 {
 		rawGroupByCols = append(rawGroupByCols, "equipment_path_id")
-		aliasedGroupByCols = append(aliasedGroupByCols, "j.equipment_path_id")
-		aliasedSelectCols = append(aliasedSelectCols, "j.equipment_path_id")
+		aliasedGroupByCols = append(aliasedGroupByCols, "p.equipment_path_id")
+		aliasedSelectCols = append(aliasedSelectCols, "p.equipment_path_id")
 		cteSelectCols = append(cteSelectCols, "equipment_path_id")
 	} else {
 		aliasedSelectCols = append(aliasedSelectCols, "NULL as equipment_path_id")
