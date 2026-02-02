@@ -16,7 +16,7 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	// Determine Grouping Levels
 	// Determine Grouping Levels
-	// We need separate lists for CTEs (raw names) and Main Query (aliased with 'j')
+	// We need separate lists for CTEs (raw names) and Main Query (aliased with 'p' for product_agg)
 	rawGroupByCols := []string{"process_code"}
 	aliasedGroupByCols := []string{"p.process_code"}
 	aliasedSelectCols := []string{"p.process_code"}
