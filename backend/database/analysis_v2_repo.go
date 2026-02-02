@@ -301,6 +301,165 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	log.Printf("Executing Analysis Query: %s [Args: %v]", fullQuery, args)
 
+	// === DEBUG: Check CTE Row Counts ===
+	// Check joined_data count
+	debugJoinedDataQuery := fmt.Sprintf(`
+		WITH joined_data AS (
+			SELECT 
+				g.product_id,
+				g.total_defects,
+				g.panel_map,
+				g.panel_addrs,
+				g.work_time,
+				g.process_code,
+				g.equipment_line_id,
+				g.equipment_machine_id,
+				g.equipment_path_id
+			FROM glass_stats g
+			WHERE %s
+		)
+		SELECT COUNT(*) FROM joined_data
+	`, strings.Join(whereClauses, " AND "))
+
+	var joinedDataCount int
+	if err := conn.QueryRow(debugJoinedDataQuery, args...).Scan(&joinedDataCount); err != nil {
+		log.Printf("[DEBUG] Failed to count joined_data: %v", err)
+	} else {
+		log.Printf("[DEBUG] joined_data CTE rows: %d", joinedDataCount)
+	}
+
+	// Check exploded_maps count (only if joined_data has rows)
+	if joinedDataCount > 0 {
+		debugExplodedQuery := fmt.Sprintf(`
+			WITH joined_data AS (
+				SELECT 
+					g.product_id,
+					g.total_defects,
+					g.panel_map,
+					g.panel_addrs,
+					g.work_time,
+					g.process_code,
+					g.equipment_line_id,
+					g.equipment_machine_id,
+					g.equipment_path_id
+				FROM glass_stats g
+				WHERE %s
+			),
+			exploded_maps AS (
+				SELECT 
+					%s,
+					UNNEST(panel_addrs) as addr,
+					UNNEST(panel_map) as cnt
+				FROM joined_data
+			)
+			SELECT COUNT(*) FROM exploded_maps
+		`, strings.Join(whereClauses, " AND "), cteSelectStr)
+
+		var explodedCount int
+		if err := conn.QueryRow(debugExplodedQuery, args...).Scan(&explodedCount); err != nil {
+			log.Printf("[DEBUG] Failed to count exploded_maps: %v", err)
+		} else {
+			log.Printf("[DEBUG] exploded_maps CTE rows: %d", explodedCount)
+		}
+
+		// Check map_final count
+		debugMapFinalQuery := fmt.Sprintf(`
+			WITH joined_data AS (
+				SELECT 
+					g.product_id,
+					g.total_defects,
+					g.panel_map,
+					g.panel_addrs,
+					g.work_time,
+					g.process_code,
+					g.equipment_line_id,
+					g.equipment_machine_id,
+					g.equipment_path_id
+				FROM glass_stats g
+				WHERE %s
+			),
+			exploded_maps AS (
+				SELECT 
+					%s,
+					UNNEST(panel_addrs) as addr,
+					UNNEST(panel_map) as cnt
+				FROM joined_data
+			),
+			map_final AS (
+				SELECT
+					%s,
+					CAST(to_json(list(addr)) AS VARCHAR) as panel_addrs,
+					CAST(to_json(list(panel_cnt)) AS VARCHAR) as panel_map
+				FROM (
+					SELECT 
+						%s,
+						addr,
+						SUM(cnt) as panel_cnt
+					FROM exploded_maps
+					GROUP BY %s, addr
+					ORDER BY addr
+				) sub
+				GROUP BY %s
+			)
+			SELECT COUNT(*) FROM map_final
+		`, strings.Join(whereClauses, " AND "), cteSelectStr, cteSelectStr, cteSelectStr,
+			strings.Join(rawGroupByCols, ", "), strings.Join(rawGroupByCols, ", "))
+
+		var mapFinalCount int
+		if err := conn.QueryRow(debugMapFinalQuery, args...).Scan(&mapFinalCount); err != nil {
+			log.Printf("[DEBUG] Failed to count map_final: %v", err)
+		} else {
+			log.Printf("[DEBUG] map_final CTE rows: %d", mapFinalCount)
+		}
+
+		// Check dpu_agg count
+		debugDpuAggQuery := fmt.Sprintf(`
+			WITH joined_data AS (
+				SELECT 
+					g.product_id,
+					g.total_defects,
+					g.panel_map,
+					g.panel_addrs,
+					g.work_time,
+					g.process_code,
+					g.equipment_line_id,
+					g.equipment_machine_id,
+					g.equipment_path_id
+				FROM glass_stats g
+				WHERE %s
+			),
+			dpu_trend AS (
+				SELECT
+					%s,
+					CAST(work_time AS DATE) as work_date,
+					SUM(total_defects)::DOUBLE / COUNT(DISTINCT product_id) as dpu
+				FROM joined_data
+				GROUP BY %s, CAST(work_time AS DATE)
+			),
+			dpu_agg AS (
+				SELECT
+					%s,
+					CAST(to_json(list({'work_date': CAST(work_date as VARCHAR), 'dpu': dpu})) AS VARCHAR) as trend_json
+				FROM dpu_trend
+				GROUP BY %s
+			)
+			SELECT COUNT(*) FROM dpu_agg
+		`, strings.Join(whereClauses, " AND "), cteSelectStr, strings.Join(rawGroupByCols, ", "),
+			cteSelectStr, strings.Join(rawGroupByCols, ", "))
+
+		var dpuAggCount int
+		if err := conn.QueryRow(debugDpuAggQuery, args...).Scan(&dpuAggCount); err != nil {
+			log.Printf("[DEBUG] Failed to count dpu_agg: %v", err)
+		} else {
+			log.Printf("[DEBUG] dpu_agg CTE rows: %d", dpuAggCount)
+		}
+
+		// Log JOIN conditions
+		log.Printf("[DEBUG] JOIN conditions (map_final): %s", joinClause)
+		log.Printf("[DEBUG] JOIN conditions (dpu_agg): %s", dpuJoinClause)
+	}
+	// === END DEBUG ===
+
 	rows, err := conn.Query(fullQuery, args...)
 	if err != nil {
 		return nil, err
