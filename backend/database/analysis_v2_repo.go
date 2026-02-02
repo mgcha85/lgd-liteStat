@@ -201,16 +201,16 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	// Build Dynamic Join Conditions
 	var joinConditions []string
-	joinConditions = append(joinConditions, "(j.process_code IS NOT DISTINCT FROM mf.process_code)")
+	joinConditions = append(joinConditions, "(p.process_code IS NOT DISTINCT FROM mf.process_code)")
 
 	if targetDepth >= 1 {
-		joinConditions = append(joinConditions, "(j.equipment_line_id IS NOT DISTINCT FROM mf.equipment_line_id)")
+		joinConditions = append(joinConditions, "(p.equipment_line_id IS NOT DISTINCT FROM mf.equipment_line_id)")
 	}
 	if targetDepth >= 2 {
-		joinConditions = append(joinConditions, "(j.equipment_machine_id IS NOT DISTINCT FROM mf.equipment_machine_id)")
+		joinConditions = append(joinConditions, "(p.equipment_machine_id IS NOT DISTINCT FROM mf.equipment_machine_id)")
 	}
 	if targetDepth >= 3 {
-		joinConditions = append(joinConditions, "(j.equipment_path_id IS NOT DISTINCT FROM mf.equipment_path_id)")
+		joinConditions = append(joinConditions, "(p.equipment_path_id IS NOT DISTINCT FROM mf.equipment_path_id)")
 	}
 
 	joinClause := strings.Join(joinConditions, " AND ")
@@ -232,6 +232,15 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 				g.equipment_path_id
 			FROM glass_stats g
 			WHERE %s
+		),
+		product_agg AS (
+			SELECT
+				%s,
+				COUNT(DISTINCT product_id) as total_products,
+				SUM(total_defects) as total_defects,
+				(SUM(total_defects)::DOUBLE / COUNT(DISTINCT product_id)) as dpu
+			FROM joined_data
+			GROUP BY %s
 		),
 		exploded_maps AS (
 			SELECT 
@@ -273,31 +282,31 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		)
 		SELECT 
 			%s,
-			COUNT(DISTINCT j.product_id) as total_products,
-			SUM(j.total_defects) as total_defects,
-			(SUM(j.total_defects)::DOUBLE / COUNT(DISTINCT j.product_id)) as dpu,
+			p.total_products,
+			p.total_defects,
+			p.dpu,
 			mf.panel_addrs,
 			mf.panel_map,
 			da.trend_json
-		FROM joined_data j
+		FROM product_agg p
 		LEFT JOIN map_final mf ON %s
         LEFT JOIN dpu_agg da ON %s
-		GROUP BY %s, mf.panel_addrs, mf.panel_map, da.trend_json
 	`,
-		strings.Join(whereClauses, " AND "),
-		cteSelectStr,                           // exploded_maps SELECT
-		cteSelectStr,                           // map_final SELECT
-		cteSelectStr,                           // map_final subquery SELECT
-		strings.Join(rawGroupByCols, ", "),     // map_final subquery GROUP BY
-		strings.Join(rawGroupByCols, ", "),     // map_final GROUP BY
-		cteSelectStr,                           // dpu_trend SELECT
-		strings.Join(rawGroupByCols, ", "),     // dpu_trend GROUP BY
-		cteSelectStr,                           // dpu_agg SELECT
-		strings.Join(rawGroupByCols, ", "),     // dpu_agg GROUP BY
-		strings.Join(aliasedSelectCols, ", "),  // main select level (j.)
-		joinClause,                             // Dynamic JOIN mf
-		dpuJoinClause,                          // Dynamic JOIN da
-		strings.Join(aliasedGroupByCols, ", ")) // main select group by (j.)
+		strings.Join(whereClauses, " AND "),   // WHERE clause
+		cteSelectStr,                          // product_agg SELECT
+		strings.Join(rawGroupByCols, ", "),    // product_agg GROUP BY
+		cteSelectStr,                          // exploded_maps SELECT
+		cteSelectStr,                          // map_final SELECT
+		cteSelectStr,                          // map_final subquery SELECT
+		strings.Join(rawGroupByCols, ", "),    // map_final subquery GROUP BY
+		strings.Join(rawGroupByCols, ", "),    // map_final GROUP BY
+		cteSelectStr,                          // dpu_trend SELECT
+		strings.Join(rawGroupByCols, ", "),    // dpu_trend GROUP BY
+		cteSelectStr,                          // dpu_agg SELECT
+		strings.Join(rawGroupByCols, ", "),    // dpu_agg GROUP BY
+		strings.Join(aliasedSelectCols, ", "), // main SELECT (p.)
+		joinClause,                            // JOIN mf condition
+		dpuJoinClause)                         // JOIN da condition
 
 	log.Printf("Executing Analysis Query: %s [Args: %v]", fullQuery, args)
 
@@ -457,6 +466,118 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		// Log JOIN conditions
 		log.Printf("[DEBUG] JOIN conditions (map_final): %s", joinClause)
 		log.Printf("[DEBUG] JOIN conditions (dpu_agg): %s", dpuJoinClause)
+
+		// === ADDITIONAL DEBUG: Sample Keys ===
+		// Show sample keys from joined_data
+		debugKeysQuery := fmt.Sprintf(`
+			WITH joined_data AS (
+				SELECT 
+					g.product_id,
+					g.total_defects,
+					g.panel_map,
+					g.panel_addrs,
+					g.work_time,
+					g.process_code,
+					g.equipment_line_id,
+					g.equipment_machine_id,
+					g.equipment_path_id
+				FROM glass_stats g
+				WHERE %s
+			)
+			SELECT DISTINCT %s
+			FROM joined_data
+			LIMIT 3
+		`, strings.Join(whereClauses, " AND "), cteSelectStr)
+
+		keyRows, err := conn.Query(debugKeysQuery, args...)
+		if err == nil {
+			defer keyRows.Close()
+			log.Printf("[DEBUG] Sample keys from joined_data:")
+			for keyRows.Next() {
+				// Scan based on targetDepth
+				var procCode string
+				var eqLine, eqMach, eqPath sql.NullString
+
+				if targetDepth >= 3 {
+					keyRows.Scan(&procCode, &eqLine, &eqMach, &eqPath)
+				} else if targetDepth >= 2 {
+					keyRows.Scan(&procCode, &eqLine, &eqMach)
+				} else if targetDepth >= 1 {
+					keyRows.Scan(&procCode, &eqLine)
+				} else {
+					keyRows.Scan(&procCode)
+				}
+
+				log.Printf("  -> process=%s, line=%v, machine=%v, path=%v",
+					procCode, eqLine.String, eqMach.String, eqPath.String)
+			}
+		}
+
+		// Show sample keys from map_final
+		debugMapKeysQuery := fmt.Sprintf(`
+			WITH joined_data AS (
+				SELECT 
+					g.product_id,
+					g.total_defects,
+					g.panel_map,
+					g.panel_addrs,
+					g.work_time,
+					g.process_code,
+					g.equipment_line_id,
+					g.equipment_machine_id,
+					g.equipment_path_id
+				FROM glass_stats g
+				WHERE %s
+			),
+			exploded_maps AS (
+				SELECT 
+					%s,
+					UNNEST(panel_addrs) as addr,
+					UNNEST(panel_map) as cnt
+				FROM joined_data
+			),
+			map_final AS (
+				SELECT
+					%s,
+					CAST(to_json(list(addr)) AS VARCHAR) as panel_addrs,
+					CAST(to_json(list(panel_cnt)) AS VARCHAR) as panel_map
+				FROM (
+					SELECT 
+						%s,
+						addr,
+						SUM(cnt) as panel_cnt
+					FROM exploded_maps
+					GROUP BY %s, addr
+					ORDER BY addr
+				) sub
+				GROUP BY %s
+			)
+			SELECT %s FROM map_final LIMIT 3
+		`, strings.Join(whereClauses, " AND "), cteSelectStr, cteSelectStr, cteSelectStr,
+			strings.Join(rawGroupByCols, ", "), strings.Join(rawGroupByCols, ", "), cteSelectStr)
+
+		mapKeyRows, err := conn.Query(debugMapKeysQuery, args...)
+		if err == nil {
+			defer mapKeyRows.Close()
+			log.Printf("[DEBUG] Sample keys from map_final:")
+			for mapKeyRows.Next() {
+				var procCode string
+				var eqLine, eqMach, eqPath sql.NullString
+
+				if targetDepth >= 3 {
+					mapKeyRows.Scan(&procCode, &eqLine, &eqMach, &eqPath)
+				} else if targetDepth >= 2 {
+					mapKeyRows.Scan(&procCode, &eqLine, &eqMach)
+				} else if targetDepth >= 1 {
+					mapKeyRows.Scan(&procCode, &eqLine)
+				} else {
+					mapKeyRows.Scan(&procCode)
+				}
+
+				log.Printf("  -> process=%s, line=%v, machine=%v, path=%v",
+					procCode, eqLine.String, eqMach.String, eqPath.String)
+			}
+		}
 	}
 	// === END DEBUG ===
 
