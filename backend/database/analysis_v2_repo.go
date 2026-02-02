@@ -571,21 +571,16 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 			defer mapKeyRows.Close()
 			log.Printf("[DEBUG] Sample keys from map_final:")
 			for mapKeyRows.Next() {
-				var procCode string
+				var procCode sql.NullString
 				var eqLine, eqMach, eqPath sql.NullString
-
-				if targetDepth >= 3 {
-					mapKeyRows.Scan(&procCode, &eqLine, &eqMach, &eqPath)
-				} else if targetDepth >= 2 {
-					mapKeyRows.Scan(&procCode, &eqLine, &eqMach)
-				} else if targetDepth >= 1 {
-					mapKeyRows.Scan(&procCode, &eqLine)
-				} else {
-					mapKeyRows.Scan(&procCode)
+				
+				if err := mapKeyRows.Scan(&procCode, &eqLine, &eqMach, &eqPath); err != nil {
+					log.Printf("[DEBUG] map_final Scan error: %v", err)
+					continue
 				}
-
-				log.Printf("  -> process=%s, line=%v, machine=%v, path=%v",
-					procCode, eqLine.String, eqMach.String, eqPath.String)
+				
+				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s",
+					procCode.String, eqLine.String, eqMach.String, eqPath.String)
 			}
 		}
 	}
