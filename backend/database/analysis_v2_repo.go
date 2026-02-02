@@ -626,7 +626,7 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		}
 
 		// Show sample keys from dpu_agg (should match product_agg!)
-		debugDpuAggQuery := fmt.Sprintf(`
+		debugDpuAggKeysQuery := fmt.Sprintf(`
 			WITH joined_data AS (
 				SELECT 
 					g.product_id, g.total_defects, g.panel_map, g.panel_addrs, g.work_time,
@@ -651,7 +651,7 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 			cteSelectStr, strings.Join(rawGroupByCols, ", "), cteSelectStr)
 
 		var dpuRows *sql.Rows
-		dpuRows, err = conn.Query(debugDpuAggQuery, args...)
+		dpuRows, err = conn.Query(debugDpuAggKeysQuery, args...)
 		if err == nil {
 			defer dpuRows.Close()
 			log.Printf("[DEBUG] Sample keys from dpu_agg:")
