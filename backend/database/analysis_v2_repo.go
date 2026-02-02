@@ -467,8 +467,22 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		log.Printf("[DEBUG] JOIN conditions (map_final): %s", joinClause)
 		log.Printf("[DEBUG] JOIN conditions (dpu_agg): %s", dpuJoinClause)
 
+		// === RAW DATA DEBUG ===
+		debugRaw := fmt.Sprintf(`SELECT g.process_code, g.equipment_line_id, g.product_id FROM glass_stats g WHERE %s LIMIT 3`, strings.Join(whereClauses, " AND "))
+		rawRows, _ := conn.Query(debugRaw, args...)
+		if rawRows != nil {
+			defer rawRows.Close()
+			log.Printf("[DEBUG] RAW glass_stats data:")
+			for rawRows.Next() {
+				var proc, line, prod sql.NullString
+				rawRows.Scan(&proc, &line, &prod)
+				log.Printf("  RAW: process=%s, line=%s, product=%s", proc.String, line.String, prod.String)
+			}
+		}
+		// === END RAW DATA DEBUG ===
+
 		// === ADDITIONAL DEBUG: Sample Keys ===
-		// Show sample keys from joined_data
+		//Show sample keys from joined_data
 		debugKeysQuery := fmt.Sprintf(`
 			WITH joined_data AS (
 				SELECT 
