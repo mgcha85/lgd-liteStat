@@ -510,22 +510,16 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 			defer keyRows.Close()
 			log.Printf("[DEBUG] Sample keys from joined_data:")
 			for keyRows.Next() {
-				// Scan based on targetDepth
-				var procCode string
+				var procCode sql.NullString
 				var eqLine, eqMach, eqPath sql.NullString
-
-				if targetDepth >= 3 {
-					keyRows.Scan(&procCode, &eqLine, &eqMach, &eqPath)
-				} else if targetDepth >= 2 {
-					keyRows.Scan(&procCode, &eqLine, &eqMach)
-				} else if targetDepth >= 1 {
-					keyRows.Scan(&procCode, &eqLine)
-				} else {
-					keyRows.Scan(&procCode)
+				
+				if err := keyRows.Scan(&procCode, &eqLine, &eqMach, &eqPath); err != nil {
+					log.Printf("[DEBUG] Scan error: %v", err)
+					continue
 				}
-
-				log.Printf("  -> process=%s, line=%v, machine=%v, path=%v",
-					procCode, eqLine.String, eqMach.String, eqPath.String)
+				
+				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s",
+					procCode.String, eqLine.String, eqMach.String, eqPath.String)
 			}
 		}
 
