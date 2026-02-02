@@ -498,10 +498,10 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 				FROM glass_stats g
 				WHERE %s
 			)
-			SELECT DISTINCT %s
+			SELECT DISTINCT process_code, equipment_line_id, equipment_machine_id, equipment_path_id
 			FROM joined_data
 			LIMIT 3
-		`, strings.Join(whereClauses, " AND "), cteSelectStr)
+		`, strings.Join(whereClauses, " AND "))
 
 		keyRows, err := conn.Query(debugKeysQuery, args...)
 		if err == nil {
