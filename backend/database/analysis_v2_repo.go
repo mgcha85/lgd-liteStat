@@ -243,8 +243,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		map_final AS (
 			SELECT
 				%s,
-				to_json(list(addr)) as panel_addrs,
-				to_json(list(panel_cnt)) as panel_map
+				CAST(to_json(list(addr)) AS VARCHAR) as panel_addrs,
+				CAST(to_json(list(panel_cnt)) AS VARCHAR) as panel_map
 			FROM (
 				SELECT 
 					%s,
@@ -267,7 +267,7 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		dpu_agg AS (
 		    SELECT
 		        %s,
-		        to_json(list({'work_date': CAST(work_date as VARCHAR), 'dpu': dpu})) as trend_json
+		        CAST(to_json(list({'work_date': CAST(work_date as VARCHAR), 'dpu': dpu})) AS VARCHAR) as trend_json
             FROM dpu_trend
             GROUP BY %s
 		)
