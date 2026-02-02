@@ -505,7 +505,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 			LIMIT 3
 		`, strings.Join(whereClauses, " AND "))
 
-		keyRows, err := conn.Query(debugKeysQuery, args...)
+		var keyRows *sql.Rows
+		keyRows, err = conn.Query(debugKeysQuery, args...)
 		if err == nil {
 			defer keyRows.Close()
 			log.Printf("[DEBUG] Sample keys from joined_data:")
@@ -540,7 +541,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 			SELECT * FROM product_agg LIMIT 3
 		`, strings.Join(whereClauses, " AND "), cteSelectStr, strings.Join(rawGroupByCols, ", "))
 
-		prodRows, err := conn.Query(debugProdAggQuery, args...)
+		var prodRows *sql.Rows
+		prodRows, err = conn.Query(debugProdAggQuery, args...)
 		if err == nil {
 			defer prodRows.Close()
 			log.Printf("[DEBUG] Sample keys from product_agg:")
@@ -604,7 +606,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		`, strings.Join(whereClauses, " AND "), cteSelectStr, cteSelectStr, cteSelectStr,
 			strings.Join(rawGroupByCols, ", "), strings.Join(rawGroupByCols, ", "), cteSelectStr)
 
-		mapKeyRows, err := conn.Query(debugMapKeysQuery, args...)
+		var mapKeyRows *sql.Rows
+		mapKeyRows, err = conn.Query(debugMapKeysQuery, args...)
 		if err == nil {
 			defer mapKeyRows.Close()
 			log.Printf("[DEBUG] Sample keys from map_final:")
@@ -620,6 +623,52 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s",
 					procCode.String, eqLine.String, eqMach.String, eqPath.String)
 			}
+		}
+
+		// Show sample keys from dpu_agg (should match product_agg!)
+		debugDpuAggQuery := fmt.Sprintf(`
+			WITH joined_data AS (
+				SELECT 
+					g.product_id, g.total_defects, g.panel_map, g.panel_addrs, g.work_time,
+					g.process_code, g.equipment_line_id, g.equipment_machine_id, g.equipment_path_id
+				FROM glass_stats g
+				WHERE %s
+			),
+			dpu_trend AS (
+				SELECT %s, CAST(work_time AS DATE) as work_date,
+					SUM(total_defects)::DOUBLE / COUNT(DISTINCT product_id) as dpu
+				FROM joined_data
+				GROUP BY %s, CAST(work_time AS DATE)
+			),
+			dpu_agg AS (
+				SELECT %s,
+					CAST(to_json(list({'work_date': CAST(work_date as VARCHAR), 'dpu': dpu})) AS VARCHAR) as trend_json
+				FROM dpu_trend
+				GROUP BY %s
+			)
+			SELECT %s FROM dpu_agg LIMIT 3
+		`, strings.Join(whereClauses, " AND "), cteSelectStr, strings.Join(rawGroupByCols, ", "),
+			cteSelectStr, strings.Join(rawGroupByCols, ", "), cteSelectStr)
+
+		var dpuRows *sql.Rows
+		dpuRows, err = conn.Query(debugDpuAggQuery, args...)
+		if err == nil {
+			defer dpuRows.Close()
+			log.Printf("[DEBUG] Sample keys from dpu_agg:")
+			for dpuRows.Next() {
+				var procCode sql.NullString
+				var eqLine, eqMach, eqPath sql.NullString
+
+				if err := dpuRows.Scan(&procCode, &eqLine, &eqMach, &eqPath); err != nil {
+					log.Printf("[DEBUG] dpu_agg Scan error: %v", err)
+					continue
+				}
+
+				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s",
+					procCode.String, eqLine.String, eqMach.String, eqPath.String)
+			}
+		} else {
+			log.Printf("[DEBUG] dpu_agg query error: %v", err)
 		}
 	}
 	// === END DEBUG ===
