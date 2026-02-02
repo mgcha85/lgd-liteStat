@@ -193,6 +193,8 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		log.Printf("[DEBUG] Failed to count combined rows: %v", err)
 	} else {
 		log.Printf("[DEBUG] COMBINED Filtered Source Rows: %d", finalCount)
+		log.Printf("[DEBUG] WHERE Clause: %s", strings.Join(whereClauses, " AND "))
+		log.Printf("[DEBUG] WHERE Args: %v", args)
 	}
 	// -----------------------------
 
