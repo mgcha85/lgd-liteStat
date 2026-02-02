@@ -512,15 +512,53 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 			for keyRows.Next() {
 				var procCode sql.NullString
 				var eqLine, eqMach, eqPath sql.NullString
-				
+
 				if err := keyRows.Scan(&procCode, &eqLine, &eqMach, &eqPath); err != nil {
 					log.Printf("[DEBUG] Scan error: %v", err)
 					continue
 				}
-				
+
 				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s",
 					procCode.String, eqLine.String, eqMach.String, eqPath.String)
 			}
+		}
+
+		// Show sample keys from product_agg (the main aggregation!)
+		debugProdAggQuery := fmt.Sprintf(`
+			WITH joined_data AS (
+				SELECT 
+					g.product_id, g.total_defects, g.panel_map, g.panel_addrs, g.work_time,
+					g.process_code, g.equipment_line_id, g.equipment_machine_id, g.equipment_path_id
+				FROM glass_stats g
+				WHERE %s
+			),
+			product_agg AS (
+				SELECT %s, COUNT(DISTINCT product_id) as cnt
+				FROM joined_data
+				GROUP BY %s
+			)
+			SELECT * FROM product_agg LIMIT 3
+		`, strings.Join(whereClauses, " AND "), cteSelectStr, strings.Join(rawGroupByCols, ", "))
+
+		prodRows, err := conn.Query(debugProdAggQuery, args...)
+		if err == nil {
+			defer prodRows.Close()
+			log.Printf("[DEBUG] Sample keys from product_agg:")
+			for prodRows.Next() {
+				var procCode sql.NullString
+				var eqLine, eqMach, eqPath sql.NullString
+				var cnt int
+
+				if err := prodRows.Scan(&procCode, &eqLine, &eqMach, &eqPath, &cnt); err != nil {
+					log.Printf("[DEBUG] product_agg Scan error: %v", err)
+					continue
+				}
+
+				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s, count=%d",
+					procCode.String, eqLine.String, eqMach.String, eqPath.String, cnt)
+			}
+		} else {
+			log.Printf("[DEBUG] product_agg query error: %v", err)
 		}
 
 		// Show sample keys from map_final
@@ -573,12 +611,12 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 			for mapKeyRows.Next() {
 				var procCode sql.NullString
 				var eqLine, eqMach, eqPath sql.NullString
-				
+
 				if err := mapKeyRows.Scan(&procCode, &eqLine, &eqMach, &eqPath); err != nil {
 					log.Printf("[DEBUG] map_final Scan error: %v", err)
 					continue
 				}
-				
+
 				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s",
 					procCode.String, eqLine.String, eqMach.String, eqPath.String)
 			}
