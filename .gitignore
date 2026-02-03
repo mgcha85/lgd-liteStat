@@ -57,3 +57,7 @@ coverage/
 
 # Archive files
 *.tar
+
+venv/
+pylib/
+*.py

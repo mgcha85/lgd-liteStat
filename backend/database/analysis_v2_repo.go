@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -140,64 +141,6 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		return nil, err
 	}
 
-	// --- DEBUG: Granular Verification ---
-	// 0. Check DB Connection & Total Count
-	var totalCount int
-	if err := conn.QueryRow("SELECT COUNT(*) FROM glass_stats").Scan(&totalCount); err != nil {
-		log.Printf("[DEBUG] FATAL: Could not query glass_stats: %v", err)
-	} else {
-		log.Printf("[DEBUG] Total Rows in glass_stats: %d", totalCount)
-	}
-
-	// 1. Check Date Match
-	var dateCount int
-	// Re-construct filter args independently for debug
-	// Date
-	dateFilter := fmt.Sprintf("%s BETWEEN CAST(? AS DATE) AND CAST(? AS TIMESTAMP)", "g.inspection_time")
-	if params.DateType == "work" {
-		dateFilter = "CAST(g.work_time AS DATE) BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)"
-	} else {
-		dateFilter = "CAST(g.inspection_time AS DATE) BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)"
-	}
-	if err := conn.QueryRow("SELECT COUNT(*) FROM glass_stats g WHERE "+dateFilter, params.Start, params.End).Scan(&dateCount); err != nil {
-		log.Printf("[DEBUG] Date Filter Error: %v", err)
-	} else {
-		log.Printf("[DEBUG] Rows matching Date [%s ~ %s]: %d", params.Start, params.End, dateCount)
-	}
-
-	// 2. Check Model Match
-	if params.ModelCode != "" {
-		var modelCount int
-		if err := conn.QueryRow("SELECT COUNT(*) FROM glass_stats g WHERE g.model_code = ?", params.ModelCode).Scan(&modelCount); err != nil {
-			log.Printf("[DEBUG] Model Filter Error: %v", err)
-		} else {
-			log.Printf("[DEBUG] Rows matching Model [%s]: %d", params.ModelCode, modelCount)
-		}
-	}
-
-	// 3. Check Defect Match
-	if params.DefectName != "" {
-		var defectCount int
-		normalizedDefect := norm.NFC.String(params.DefectName)
-		if err := conn.QueryRow("SELECT COUNT(*) FROM glass_stats g WHERE g.defect_name = ?", normalizedDefect).Scan(&defectCount); err != nil {
-			log.Printf("[DEBUG] Defect Filter Error: %v", err)
-		} else {
-			log.Printf("[DEBUG] Rows matching Defect [%s]: %d", normalizedDefect, defectCount)
-		}
-	}
-
-	// 4. Combined (Original debug)
-	debugQuery := fmt.Sprintf("SELECT COUNT(*) FROM glass_stats g WHERE %s", strings.Join(whereClauses, " AND "))
-	var finalCount int
-	if err := conn.QueryRow(debugQuery, args...).Scan(&finalCount); err != nil {
-		log.Printf("[DEBUG] Failed to count combined rows: %v", err)
-	} else {
-		log.Printf("[DEBUG] COMBINED Filtered Source Rows: %d", finalCount)
-		log.Printf("[DEBUG] WHERE Clause: %s", strings.Join(whereClauses, " AND "))
-		log.Printf("[DEBUG] WHERE Args: %v", args)
-	}
-	// -----------------------------
-
 	// 3. Construct Query
 	cteSelectStr := strings.Join(cteSelectCols, ", ")
 
@@ -260,7 +203,7 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 				SELECT 
 					%s,
 					addr,
-					SUM(cnt) as panel_cnt
+					CAST(SUM(cnt) AS INTEGER) as panel_cnt
 				FROM exploded_maps
 				GROUP BY %s, addr
 				ORDER BY addr
@@ -312,367 +255,6 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 
 	log.Printf("Executing Analysis Query: %s [Args: %v]", fullQuery, args)
 
-	// === DEBUG: Check CTE Row Counts ===
-	// Check joined_data count
-	debugJoinedDataQuery := fmt.Sprintf(`
-		WITH joined_data AS (
-			SELECT 
-				g.product_id,
-				g.total_defects,
-				g.panel_map,
-				g.panel_addrs,
-				g.work_time,
-				g.process_code,
-				g.equipment_line_id,
-				g.equipment_machine_id,
-				g.equipment_path_id
-			FROM glass_stats g
-			WHERE %s
-		)
-		SELECT COUNT(*) FROM joined_data
-	`, strings.Join(whereClauses, " AND "))
-
-	var joinedDataCount int
-	if err := conn.QueryRow(debugJoinedDataQuery, args...).Scan(&joinedDataCount); err != nil {
-		log.Printf("[DEBUG] Failed to count joined_data: %v", err)
-	} else {
-		log.Printf("[DEBUG] joined_data CTE rows: %d", joinedDataCount)
-	}
-
-	// Check exploded_maps count (only if joined_data has rows)
-	if joinedDataCount > 0 {
-		debugExplodedQuery := fmt.Sprintf(`
-			WITH joined_data AS (
-				SELECT 
-					g.product_id,
-					g.total_defects,
-					g.panel_map,
-					g.panel_addrs,
-					g.work_time,
-					g.process_code,
-					g.equipment_line_id,
-					g.equipment_machine_id,
-					g.equipment_path_id
-				FROM glass_stats g
-				WHERE %s
-			),
-			exploded_maps AS (
-				SELECT 
-					%s,
-					UNNEST(panel_addrs) as addr,
-					UNNEST(panel_map) as cnt
-				FROM joined_data
-			)
-			SELECT COUNT(*) FROM exploded_maps
-		`, strings.Join(whereClauses, " AND "), cteSelectStr)
-
-		var explodedCount int
-		if err := conn.QueryRow(debugExplodedQuery, args...).Scan(&explodedCount); err != nil {
-			log.Printf("[DEBUG] Failed to count exploded_maps: %v", err)
-		} else {
-			log.Printf("[DEBUG] exploded_maps CTE rows: %d", explodedCount)
-		}
-
-		// Check map_final count
-		debugMapFinalQuery := fmt.Sprintf(`
-			WITH joined_data AS (
-				SELECT 
-					g.product_id,
-					g.total_defects,
-					g.panel_map,
-					g.panel_addrs,
-					g.work_time,
-					g.process_code,
-					g.equipment_line_id,
-					g.equipment_machine_id,
-					g.equipment_path_id
-				FROM glass_stats g
-				WHERE %s
-			),
-			exploded_maps AS (
-				SELECT 
-					%s,
-					UNNEST(panel_addrs) as addr,
-					UNNEST(panel_map) as cnt
-				FROM joined_data
-			),
-			map_final AS (
-				SELECT
-					%s,
-					CAST(to_json(list(addr)) AS VARCHAR) as panel_addrs,
-					CAST(to_json(list(panel_cnt)) AS VARCHAR) as panel_map
-				FROM (
-					SELECT 
-						%s,
-						addr,
-						SUM(cnt) as panel_cnt
-					FROM exploded_maps
-					GROUP BY %s, addr
-					ORDER BY addr
-				) sub
-				GROUP BY %s
-			)
-			SELECT COUNT(*) FROM map_final
-		`, strings.Join(whereClauses, " AND "), cteSelectStr, cteSelectStr, cteSelectStr,
-			strings.Join(rawGroupByCols, ", "), strings.Join(rawGroupByCols, ", "))
-
-		var mapFinalCount int
-		if err := conn.QueryRow(debugMapFinalQuery, args...).Scan(&mapFinalCount); err != nil {
-			log.Printf("[DEBUG] Failed to count map_final: %v", err)
-		} else {
-			log.Printf("[DEBUG] map_final CTE rows: %d", mapFinalCount)
-		}
-
-		// Check dpu_agg count
-		debugDpuAggQuery := fmt.Sprintf(`
-			WITH joined_data AS (
-				SELECT 
-					g.product_id,
-					g.total_defects,
-					g.panel_map,
-					g.panel_addrs,
-					g.work_time,
-					g.process_code,
-					g.equipment_line_id,
-					g.equipment_machine_id,
-					g.equipment_path_id
-				FROM glass_stats g
-				WHERE %s
-			),
-			dpu_trend AS (
-				SELECT
-					%s,
-					CAST(work_time AS DATE) as work_date,
-					SUM(total_defects)::DOUBLE / COUNT(DISTINCT product_id) as dpu
-				FROM joined_data
-				GROUP BY %s, CAST(work_time AS DATE)
-			),
-			dpu_agg AS (
-				SELECT
-					%s,
-					CAST(to_json(list({'work_date': CAST(work_date as VARCHAR), 'dpu': dpu})) AS VARCHAR) as trend_json
-				FROM dpu_trend
-				GROUP BY %s
-			)
-			SELECT COUNT(*) FROM dpu_agg
-		`, strings.Join(whereClauses, " AND "), cteSelectStr, strings.Join(rawGroupByCols, ", "),
-			cteSelectStr, strings.Join(rawGroupByCols, ", "))
-
-		var dpuAggCount int
-		if err := conn.QueryRow(debugDpuAggQuery, args...).Scan(&dpuAggCount); err != nil {
-			log.Printf("[DEBUG] Failed to count dpu_agg: %v", err)
-		} else {
-			log.Printf("[DEBUG] dpu_agg CTE rows: %d", dpuAggCount)
-		}
-
-		// Log JOIN conditions
-		log.Printf("[DEBUG] JOIN conditions (map_final): %s", joinClause)
-		log.Printf("[DEBUG] JOIN conditions (dpu_agg): %s", dpuJoinClause)
-
-		// === RAW DATA DEBUG ===
-		debugRaw := fmt.Sprintf(`SELECT g.process_code, g.equipment_line_id, g.product_id FROM glass_stats g WHERE %s LIMIT 3`, strings.Join(whereClauses, " AND "))
-		rawRows, _ := conn.Query(debugRaw, args...)
-		if rawRows != nil {
-			defer rawRows.Close()
-			log.Printf("[DEBUG] RAW glass_stats data:")
-			for rawRows.Next() {
-				var proc, line, prod sql.NullString
-				rawRows.Scan(&proc, &line, &prod)
-				log.Printf("  RAW: process=%s, line=%s, product=%s", proc.String, line.String, prod.String)
-			}
-		}
-		// === END RAW DATA DEBUG ===
-
-		// === ADDITIONAL DEBUG: Sample Keys ===
-		//Show sample keys from joined_data
-		debugKeysQuery := fmt.Sprintf(`
-			WITH joined_data AS (
-				SELECT 
-					g.product_id,
-					g.total_defects,
-					g.panel_map,
-					g.panel_addrs,
-					g.work_time,
-					g.process_code,
-					g.equipment_line_id,
-					g.equipment_machine_id,
-					g.equipment_path_id
-				FROM glass_stats g
-				WHERE %s
-			)
-			SELECT DISTINCT process_code, equipment_line_id, equipment_machine_id, equipment_path_id
-			FROM joined_data
-			LIMIT 3
-		`, strings.Join(whereClauses, " AND "))
-
-		var keyRows *sql.Rows
-		keyRows, err = conn.Query(debugKeysQuery, args...)
-		if err == nil {
-			defer keyRows.Close()
-			log.Printf("[DEBUG] Sample keys from joined_data:")
-			for keyRows.Next() {
-				var procCode sql.NullString
-				var eqLine, eqMach, eqPath sql.NullString
-
-				if err := keyRows.Scan(&procCode, &eqLine, &eqMach, &eqPath); err != nil {
-					log.Printf("[DEBUG] Scan error: %v", err)
-					continue
-				}
-
-				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s",
-					procCode.String, eqLine.String, eqMach.String, eqPath.String)
-			}
-		}
-
-		// Show sample keys from product_agg (the main aggregation!)
-		debugProdAggQuery := fmt.Sprintf(`
-			WITH joined_data AS (
-				SELECT 
-					g.product_id, g.total_defects, g.panel_map, g.panel_addrs, g.work_time,
-					g.process_code, g.equipment_line_id, g.equipment_machine_id, g.equipment_path_id
-				FROM glass_stats g
-				WHERE %s
-			),
-			product_agg AS (
-				SELECT %s, COUNT(DISTINCT product_id) as cnt
-				FROM joined_data
-				GROUP BY %s
-			)
-			SELECT * FROM product_agg LIMIT 3
-		`, strings.Join(whereClauses, " AND "), cteSelectStr, strings.Join(rawGroupByCols, ", "))
-
-		var prodRows *sql.Rows
-		prodRows, err = conn.Query(debugProdAggQuery, args...)
-		if err == nil {
-			defer prodRows.Close()
-			log.Printf("[DEBUG] Sample keys from product_agg:")
-			for prodRows.Next() {
-				var procCode sql.NullString
-				var eqLine, eqMach, eqPath sql.NullString
-				var cnt int
-
-				if err := prodRows.Scan(&procCode, &eqLine, &eqMach, &eqPath, &cnt); err != nil {
-					log.Printf("[DEBUG] product_agg Scan error: %v", err)
-					continue
-				}
-
-				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s, count=%d",
-					procCode.String, eqLine.String, eqMach.String, eqPath.String, cnt)
-			}
-		} else {
-			log.Printf("[DEBUG] product_agg query error: %v", err)
-		}
-
-		// Show sample keys from map_final
-		debugMapKeysQuery := fmt.Sprintf(`
-			WITH joined_data AS (
-				SELECT 
-					g.product_id,
-					g.total_defects,
-					g.panel_map,
-					g.panel_addrs,
-					g.work_time,
-					g.process_code,
-					g.equipment_line_id,
-					g.equipment_machine_id,
-					g.equipment_path_id
-				FROM glass_stats g
-				WHERE %s
-			),
-			exploded_maps AS (
-				SELECT 
-					%s,
-					UNNEST(panel_addrs) as addr,
-					UNNEST(panel_map) as cnt
-				FROM joined_data
-			),
-			map_final AS (
-				SELECT
-					%s,
-					CAST(to_json(list(addr)) AS VARCHAR) as panel_addrs,
-					CAST(to_json(list(panel_cnt)) AS VARCHAR) as panel_map
-				FROM (
-					SELECT 
-						%s,
-						addr,
-						SUM(cnt) as panel_cnt
-					FROM exploded_maps
-					GROUP BY %s, addr
-					ORDER BY addr
-				) sub
-				GROUP BY %s
-			)
-			SELECT %s FROM map_final LIMIT 3
-		`, strings.Join(whereClauses, " AND "), cteSelectStr, cteSelectStr, cteSelectStr,
-			strings.Join(rawGroupByCols, ", "), strings.Join(rawGroupByCols, ", "), cteSelectStr)
-
-		var mapKeyRows *sql.Rows
-		mapKeyRows, err = conn.Query(debugMapKeysQuery, args...)
-		if err == nil {
-			defer mapKeyRows.Close()
-			log.Printf("[DEBUG] Sample keys from map_final:")
-			for mapKeyRows.Next() {
-				var procCode sql.NullString
-				var eqLine, eqMach, eqPath sql.NullString
-
-				if err := mapKeyRows.Scan(&procCode, &eqLine, &eqMach, &eqPath); err != nil {
-					log.Printf("[DEBUG] map_final Scan error: %v", err)
-					continue
-				}
-
-				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s",
-					procCode.String, eqLine.String, eqMach.String, eqPath.String)
-			}
-		}
-
-		// Show sample keys from dpu_agg (should match product_agg!)
-		debugDpuAggKeysQuery := fmt.Sprintf(`
-			WITH joined_data AS (
-				SELECT 
-					g.product_id, g.total_defects, g.panel_map, g.panel_addrs, g.work_time,
-					g.process_code, g.equipment_line_id, g.equipment_machine_id, g.equipment_path_id
-				FROM glass_stats g
-				WHERE %s
-			),
-			dpu_trend AS (
-				SELECT %s, CAST(work_time AS DATE) as work_date,
-					SUM(total_defects)::DOUBLE / COUNT(DISTINCT product_id) as dpu
-				FROM joined_data
-				GROUP BY %s, CAST(work_time AS DATE)
-			),
-			dpu_agg AS (
-				SELECT %s,
-					CAST(to_json(list({'work_date': CAST(work_date as VARCHAR), 'dpu': dpu})) AS VARCHAR) as trend_json
-				FROM dpu_trend
-				GROUP BY %s
-			)
-			SELECT %s FROM dpu_agg LIMIT 3
-		`, strings.Join(whereClauses, " AND "), cteSelectStr, strings.Join(rawGroupByCols, ", "),
-			cteSelectStr, strings.Join(rawGroupByCols, ", "), cteSelectStr)
-
-		var dpuRows *sql.Rows
-		dpuRows, err = conn.Query(debugDpuAggKeysQuery, args...)
-		if err == nil {
-			defer dpuRows.Close()
-			log.Printf("[DEBUG] Sample keys from dpu_agg:")
-			for dpuRows.Next() {
-				var procCode sql.NullString
-				var eqLine, eqMach, eqPath sql.NullString
-
-				if err := dpuRows.Scan(&procCode, &eqLine, &eqMach, &eqPath); err != nil {
-					log.Printf("[DEBUG] dpu_agg Scan error: %v", err)
-					continue
-				}
-
-				log.Printf("  -> process=%s, line=%s, machine=%s, path=%s",
-					procCode.String, eqLine.String, eqMach.String, eqPath.String)
-			}
-		} else {
-			log.Printf("[DEBUG] dpu_agg query error: %v", err)
-		}
-	}
-	// === END DEBUG ===
-
 	rows, err := conn.Query(fullQuery, args...)
 	if err != nil {
 		return nil, err
@@ -708,10 +290,23 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		r.EquipmentMachineID = eqMach.String
 		r.EquipmentPathID = eqPath.String
 
-		// TODO: Parse Lists
-		// r.PanelMap = parseDuckDBIntList(panelMapStr)
-		// r.PanelAddrs = parseDuckDBStringList(panelAddrsStr)
-		// r.DailyDPU = parseTrendJson(trendJson)
+		// Parse Lists (JSON strings from DuckDB)
+		if panelMapStr.Valid {
+
+			if err := json.Unmarshal([]byte(panelMapStr.String), &r.PanelMap); err != nil {
+				log.Printf("[Results] Failed to parse PanelMap: %v", err)
+			}
+		}
+		if panelAddrsStr.Valid {
+			if err := json.Unmarshal([]byte(panelAddrsStr.String), &r.PanelAddrs); err != nil {
+				log.Printf("[Results] Failed to parse PanelAddrs: %v", err)
+			}
+		}
+		if trendJson != "" {
+			if err := json.Unmarshal([]byte(trendJson), &r.DailyDPU); err != nil {
+				log.Printf("[Results] Failed to parse DailyDPU: %v", err)
+			}
+		}
 
 		results = append(results, r)
 	}
