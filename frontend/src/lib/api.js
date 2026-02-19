@@ -220,3 +220,20 @@ export async function updateHeatmapConfig(config) {
 export function getExportUrl(jobId) {
     return `${API_BASE}/analyze/${jobId}/export`;
 }
+
+export async function analyzeHierarchy(params) {
+    const response = await fetch(`${API_BASE}/analyze/hierarchy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(err.error || 'Hierarchy analysis failed');
+    }
+    return response.json();
+}
+
+export function getHierarchyExportUrl(sessionId) {
+    return `${API_BASE}/analyze/hierarchy/${sessionId}/export`;
+}

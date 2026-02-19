@@ -3,6 +3,8 @@ package charting
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -159,6 +161,89 @@ func (g *Generator) GenerateHeatmap(cells []database.HeatmapCell) ([]byte, error
 
 	buf.WriteString("</svg>")
 	return buf.Bytes(), nil
+}
+
+// GenerateDPUTrendChart creates a PNG image for DPU time series (V2 Hierarchy)
+func (g *Generator) GenerateDPUTrendChart(items []database.DailyDPUItem, title string) ([]byte, error) {
+	if len(items) == 0 {
+		return nil, fmt.Errorf("no DPU data to chart")
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].WorkDate < items[j].WorkDate
+	})
+
+	var xValues []time.Time
+	var yValues []float64
+
+	for _, item := range items {
+		t, err := time.Parse("2006-01-02", item.WorkDate)
+		if err != nil {
+			continue
+		}
+		xValues = append(xValues, t)
+		yValues = append(yValues, item.DPU)
+	}
+
+	if len(xValues) == 0 {
+		return nil, fmt.Errorf("no valid date points")
+	}
+
+	dpuSeries := chart.TimeSeries{
+		Name: "DPU",
+		Style: chart.Style{
+			StrokeColor: drawing.ColorFromHex("3498db"),
+			StrokeWidth: 2,
+			DotWidth:    3,
+			DotColor:    drawing.ColorFromHex("2980b9"),
+		},
+		XValues: xValues,
+		YValues: yValues,
+	}
+
+	graph := chart.Chart{
+		Title:  title,
+		Width:  800,
+		Height: 400,
+		Background: chart.Style{
+			Padding: chart.Box{Top: 40, Left: 20, Right: 20, Bottom: 20},
+		},
+		XAxis: chart.XAxis{
+			Name:           "Date",
+			ValueFormatter: chart.TimeDateValueFormatter,
+		},
+		YAxis: chart.YAxis{
+			Name: "DPU",
+		},
+		Series: []chart.Series{dpuSeries},
+	}
+
+	graph.Elements = []chart.Renderable{
+		chart.Legend(&graph),
+	}
+
+	buffer := bytes.NewBuffer([]byte{})
+	err := graph.Render(chart.PNG, buffer)
+	return buffer.Bytes(), err
+}
+
+// SaveDPUTrendChart generates DPU trend chart and saves to file
+func (g *Generator) SaveDPUTrendChart(items []database.DailyDPUItem, title, filename, outputDir string) (string, error) {
+	data, err := g.GenerateDPUTrendChart(items, title)
+	if err != nil {
+		return "", err
+	}
+
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create dir: %w", err)
+	}
+
+	fullPath := filepath.Join(outputDir, filename)
+	if err := os.WriteFile(fullPath, data, 0644); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return fullPath, nil
 }
 
 // GenerateScatter creates a PNG image for Glass/Lot Scatter
