@@ -15,6 +15,8 @@ services:
     environment:
       - DB_PATH=/app/data/analytics.duckdb
       - CGO_ENABLED=1
+      - PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    command: /go/bin/air
     restart: unless-stopped
     networks:
       litestat-dev:
@@ -32,6 +34,9 @@ services:
       - /app/node_modules # node_modules는 이미지 내부 것 사용
     ports:
       - "8081:5173"
+    environment:
+      - PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    command: /usr/local/bin/npm run dev -- --host
     depends_on:
       - backend
       - canvas-analysis
@@ -71,7 +76,8 @@ services:
       - ./python-scheduler:/app # 소스코드 실시간 반영
     environment:
       - BACKEND_URL=http://backend:8080
-    command: python main.py
+      - PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+    command: /usr/local/bin/python3 main.py
     depends_on:
       - backend
     networks:
