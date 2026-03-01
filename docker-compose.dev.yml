@@ -54,7 +54,7 @@ services:
       - ./data:/data:ro # DuckDB read-only
     ports:
       - "8000:8000"
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       - LAKE_DIR=/data/lake
     networks:
