@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Backend Dev Service (Go + Air for hot reload)
   backend:
@@ -71,9 +69,6 @@ services:
     working_dir: /app
     volumes:
       - ./python-scheduler:/app # 소스코드 실시간 반영
-      - ./data:/app/data
-      - ./.env:/app/.env:ro
-      - ./config.yaml:/app/config.yaml:ro
     environment:
       - BACKEND_URL=http://backend:8080
     command: python main.py
