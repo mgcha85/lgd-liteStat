@@ -178,6 +178,14 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal ingest config: %w", err)
 	}
 
+	if err := viper.UnmarshalKey("scheduler", &config.Scheduler); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal scheduler config: %w", err)
+	}
+
+	if err := viper.UnmarshalKey("retention", &config.Retention); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal retention config: %w", err)
+	}
+
 	// Initialize Heatmap Config Manager
 	config.HeatmapManager = NewHeatmapConfigManager("config_heatmap.json") // Save in root
 	if err := config.HeatmapManager.Load(); err != nil {

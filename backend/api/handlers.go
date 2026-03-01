@@ -800,6 +800,35 @@ func (h *Handler) ExportAnalysis(w http.ResponseWriter, r *http.Request) {
 	w.Write(b.Bytes())
 }
 
+// UpdateMetadata handles manual trigger of metadata update job
+func (h *Handler) UpdateMetadata(w http.ResponseWriter, r *http.Request) {
+	// Parse Query Params
+	targetDate := r.URL.Query().Get("target_date")
+	if targetDate == "" {
+		// Default to yesterday? or Today?
+		// Let's require it for now to be safe, or default to today.
+		targetDate = time.Now().Format("2006-01-02")
+	}
+
+	facility := r.URL.Query().Get("facility")
+	if facility == "" {
+		facility = h.getFacility(r)
+	}
+
+	// Call DB Repo
+	if err := h.repo.UpdateMetadata(facility, targetDate); err != nil {
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("metadata update failed: %v", err))
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{
+		"status":      "success",
+		"facility":    facility,
+		"target_date": targetDate,
+		"message":     "Metadata update completed successfully",
+	})
+}
+
 // GetSchedulerConfig returns current scheduler settings
 func (h *Handler) GetSchedulerConfig(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, h.cfg.Scheduler)

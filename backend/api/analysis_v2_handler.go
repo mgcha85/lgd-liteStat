@@ -66,14 +66,19 @@ func (h *Handler) AnalyzeHierarchyHandler(w http.ResponseWriter, r *http.Request
 		entry := hierarchyResultWithChart{HierarchyResult: res}
 
 		if len(res.DailyDPU) > 0 {
-			eqLabel := buildEquipmentLabel(res)
-			filename := fmt.Sprintf("%s_dpu_%d.png", sessionID, i)
-			title := fmt.Sprintf("DPU Trend - %s", eqLabel)
-
-			if _, err := gen.SaveDPUTrendChart(res.DailyDPU, title, filename, outputDir); err != nil {
-				log.Printf("Chart generation failed for %s: %v", eqLabel, err)
+			// Skip chart generation if insufficient data (prevent zero x-range delta error)
+			if len(res.DailyDPU) < 2 {
+				log.Printf("Skipping chart generation for %s: insufficient data (count=%d)", buildEquipmentLabel(res), len(res.DailyDPU))
 			} else {
-				entry.ChartURL = "/api/images/" + filename
+				eqLabel := buildEquipmentLabel(res)
+				filename := fmt.Sprintf("%s_dpu_%d.png", sessionID, i)
+				title := fmt.Sprintf("DPU Trend - %s", eqLabel)
+
+				if _, err := gen.SaveDPUTrendChart(res.DailyDPU, title, filename, outputDir); err != nil {
+					log.Printf("Chart generation failed for %s: %v", eqLabel, err)
+				} else {
+					entry.ChartURL = "/api/images/" + filename
+				}
 			}
 		}
 

@@ -1,20 +1,23 @@
 services:
   backend:
-    image: golang:1.24-bookworm
+    # image: golang:1.24-bookworm
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: lgd-litestat-backend
     hostname: litestat-backend
-    working_dir: /app
+    # working_dir: /app
     ports:
-      - "8082:8082"
+      - "8082:8080"
     volumes:
-      - ./backend:/app
+      # - ./backend:/app # Remove volume mount for code to use built binary
       - ./data:/app/data
       - ./.env:/app/.env:ro
       - ./config.yaml:/app/config.yaml
     environment:
       - DB_PATH=/app/data/analytics.duckdb
       - CGO_ENABLED=1
-    command: sh -c "apt-get update && apt-get install -y gcc g++ make libarrow-dev && go run -mod=vendor main.go"
+    # command: sh -c "apt-get update && apt-get install -y gcc g++ make && go run -mod=vendor main.go"
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8082/health" ]
@@ -45,6 +48,35 @@ services:
         aliases:
           - litestat-frontend
     restart: unless-stopped
+
+  canvas-analysis:
+    build:
+      context: ./canvas-analysis
+      dockerfile: Dockerfile
+    container_name: lgd-canvas-analysis
+    hostname: canvas-analysis
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data:ro
+      - ./canvas-analysis/output:/app/output
+      - ./canvas-analysis/config.yaml:/app/config.yaml:ro
+    environment:
+      - LAKE_DIR=/data/lake
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      litestat-network:
+        aliases:
+          - canvas-analysis
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/docs" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 networks:
   litestat-network:

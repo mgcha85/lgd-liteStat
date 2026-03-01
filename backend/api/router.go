@@ -20,6 +20,7 @@ func SetupRouter(h *Handler) *mux.Router {
 	r.HandleFunc("/api/ingest", h.IngestData).Methods("POST")
 	r.HandleFunc("/api/mart/refresh", h.RefreshMart).Methods("POST")
 	r.HandleFunc("/api/cleanup", h.CleanupData).Methods("POST")
+	r.HandleFunc("/api/jobs/metadata", h.UpdateMetadata).Methods("POST")
 
 	// Data query endpoints
 	r.HandleFunc("/api/inspection", h.GetInspectionData).Methods("GET")

@@ -56,17 +56,10 @@ func (d *DataIngestor) IngestData(startTime, endTime time.Time, facilities []str
 	totalInspection := 0
 	totalHistory := 0
 
-	// Connect to DB once if Real Mode
-	var sourceDB *sql.DB
-	var err error
 	isRealMode := !d.config.MockData.Enabled
 
 	if isRealMode {
-		sourceDB, err = d.connectSourceDB()
-		if err != nil {
-			return nil, fmt.Errorf("failed to connect to source db: %w", err)
-		}
-		defer sourceDB.Close()
+		fmt.Println("[Ingestor] Real Mode: Skipping Postgres ingestion (data is now fetched from DynamoDB via external jobs).")
 	}
 
 	for _, fac := range facilities {
@@ -113,20 +106,13 @@ func (d *DataIngestor) IngestData(startTime, endTime time.Time, facilities []str
 		// REAL MODE
 		// 1. Ingest History
 		if doHistory {
-			hCount, err := d.ingestHistory(sourceDB, fac, t1, t2)
-			if err != nil {
-				fmt.Printf("Error ingesting history for %s: %v\n", fac, err)
-			}
-			totalHistory += hCount
+			fmt.Printf("Skipping Postgres history ingestion for %s (using DynamoDB)\n", fac)
+			// Assuming the external job inserts directly to the lake path or db via other means.
 		}
 
 		// 2. Ingest Inspection
 		if doInspection {
-			iCount, err := d.ingestInspection(sourceDB, fac, t1, t2)
-			if err != nil {
-				fmt.Printf("Error ingesting inspection for %s: %v\n", fac, err)
-			}
-			totalInspection += iCount
+			fmt.Printf("Skipping Postgres inspection ingestion for %s (using DynamoDB)\n", fac)
 		}
 	}
 

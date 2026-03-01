@@ -1,29 +1,19 @@
 # Dockerfile.dev for offline development
-# This image has Air + Go + Apache Arrow + go-duckdb dependencies pre-installed
+# This image has Air + Go installed for hot reloading
 
 FROM docker.io/library/golang:1.24-bookworm
 
-# Install build dependencies + Apache Arrow (for go-duckdb CGO)
-RUN apt-get update && apt-get install -y gcc g++ make ca-certificates lsb-release wget \
-    && wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb \
-    && apt-get install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb \
-    && apt-get update \
-    && apt-get install -y -V libarrow-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Install build dependencies
+RUN apt-get update && apt-get install -y gcc g++ make && rm -rf /var/lib/apt/lists/*
 
-# Install Air for hot reload (pinned version compatible with Go 1.24)
+# Install Air for hot reload
 RUN go install github.com/air-verse/air@v1.52.3
-
-WORKDIR /build
-
-# Pre-download and cache go modules (including go-duckdb native libraries)
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Pre-build to cache dependencies
-COPY . .
-RUN CGO_ENABLED=1 go build -o /tmp/prebuilt main.go || true
 
 WORKDIR /app
 
+# Pre-download modules to cache dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Source code is mounted at runtime
 CMD ["air"]

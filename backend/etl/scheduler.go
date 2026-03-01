@@ -134,7 +134,23 @@ func (s *Scheduler) checkAndRunCleanup() {
 	}
 
 	if shouldRun {
-		log.Println("[Scheduler] Starting Daily Cleanup...")
+		log.Println("[Scheduler] Starting Daily Tasks (Cleanup & Metadata Update)...")
+
+		// 1. Update Metadata (High Priority)
+		targetDate := now.Format("2006-01-02")
+		facilities := s.cfg.Settings.Facilities
+		if len(facilities) == 0 {
+			facilities = []string{"default"}
+		}
+
+		for _, fac := range facilities {
+			log.Printf("[Scheduler] Updating Metadata for %s @ %s", fac, targetDate)
+			if err := s.repo.UpdateMetadata(fac, targetDate); err != nil {
+				log.Printf("[Scheduler] Metadata Update Failed for %s: %v", fac, err)
+			}
+		}
+
+		// 2. Cleanup Data
 		if err := s.repo.CleanupOldData(s.cfg.Retention.DataDays, s.cfg.Settings.Facilities); err != nil {
 			log.Printf("[Scheduler] Data Cleanup Failed: %v", err)
 		}
@@ -142,6 +158,6 @@ func (s *Scheduler) checkAndRunCleanup() {
 			log.Printf("[Scheduler] Analysis Cleanup Failed: %v", err)
 		}
 		s.lastCleanup = now
-		log.Println("[Scheduler] Cleanup Completed.")
+		log.Println("[Scheduler] Daily Tasks Completed.")
 	}
 }

@@ -4,6 +4,7 @@
   import { getConfig } from "./lib/api.js";
   import Dashboard from "./lib/Dashboard.svelte";
   import Settings from "./lib/Settings.svelte";
+  import MapGridding from "./lib/MapGridding.svelte";
   import { theme } from "./lib/store.js"; // Import to initialize subscription
 
   const activeTab = writable("dashboard");
@@ -78,6 +79,17 @@
             ⚙️ 설정
           </button>
         </li>
+        <li>
+          <button
+            type="button"
+            class="rounded-xl transition-all duration-300"
+            class:active={$activeTab === "mapgridding"}
+            class:btn-active={$activeTab === "mapgridding"}
+            on:click={() => switchTab("mapgridding")}
+          >
+            🧩 맵그리딩
+          </button>
+        </li>
       </ul>
     </div>
   </div>
@@ -98,6 +110,8 @@
     {:else if $config}
       {#if $activeTab === "dashboard"}
         <Dashboard config={$config} />
+      {:else if $activeTab === "mapgridding"}
+        <MapGridding />
       {:else}
         <Settings config={$config} on:saved={refreshConfig} />
       {/if}

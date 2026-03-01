@@ -1,7 +1,7 @@
 #!/bin/bash
 # offline-save.sh
 # Save backend and frontend images to tar files for offline transfer
-# Usage: ./offline-save.sh [all|python]
+# Usage: ./offline-save.sh [all|python|canvas]
 # Default: all
 
 MODE=${1:-all}
@@ -42,8 +42,19 @@ if [ "$MODE" == "python" ]; then
     exit 0
 fi
 
+if [ "$MODE" == "canvas" ]; then
+    echo "Processing Canvas Analysis ONLY..."
+    rm -f canvas-analysis.tar
+    echo "Building Canvas Analysis Image..."
+    podman build -f ./canvas-analysis/Dockerfile -t lgd-litestat-canvas:dev ./canvas-analysis
+    echo "Saving Canvas Analysis Image..."
+    podman save --format docker-archive -o canvas-analysis.tar lgd-litestat-canvas:dev
+    echo "Done! Transfer 'canvas-analysis.tar' to the offline server."
+    exit 0
+fi
+
 # Cleanup previous files
-rm -f backend.tar frontend.tar dev-base.tar dev-images.tar python-scheduler.tar
+rm -f backend.tar frontend.tar dev-base.tar dev-images.tar python-scheduler.tar canvas-analysis.tar
 
 echo "Saving images (Full Mode)..."
 
@@ -76,10 +87,14 @@ if [ -f "./python-scheduler/.env" ]; then
 fi
 podman build -f ./python-scheduler/Dockerfile $PIP_ARGS -t lgd-litestat-python:dev ./python-scheduler
 
+# Build Canvas Analysis Image
+echo "Building Canvas Analysis Image..."
+podman build -f ./canvas-analysis/Dockerfile -t lgd-litestat-canvas:dev ./canvas-analysis
+
 echo "Saving Dev Images..."
-podman save --format docker-archive -o dev-images.tar lgd-litestat-backend:dev lgd-litestat-frontend:dev lgd-litestat-python:dev
+podman save --format docker-archive -o dev-images.tar lgd-litestat-backend:dev lgd-litestat-frontend:dev lgd-litestat-python:dev lgd-litestat-canvas:dev
 
 echo "Done! Transfer the following to the offline server:"
 echo "1. Images: backend.tar, frontend.tar, dev-images.tar"
 echo "2. Configs: docker-compose.prod.yml, docker-compose.dev.yml, offline-load.sh"
-echo "3. Source Code (for Dev): backend/, frontend/ folders"
+echo "3. Source Code (for Dev): backend/, frontend/, canvas-analysis/ folders"

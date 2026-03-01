@@ -77,6 +77,23 @@ def run_daily_tasks():
         except subprocess.CalledProcessError as e:
             logger.error(f"History download failed: {e}")
 
+        # 3. Update Metadata
+        cmd_meta = [
+            "python",
+            "daily_metadata_job.py",
+            "--start",
+            date_str,
+            "--end",
+            date_str,
+            "--fac",
+            fac,
+        ]
+        try:
+            subprocess.run(cmd_meta, check=True)
+            logger.info("Metadata update success")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Metadata update failed: {e}")
+
     logger.info("Daily Tasks Completed.")
 
 

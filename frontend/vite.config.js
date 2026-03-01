@@ -8,8 +8,13 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://backend:8082',
+        target: 'http://backend:8080',
         changeOrigin: true
+      },
+      '/canvas': {
+        target: 'http://canvas-analysis:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/canvas/, '')
       }
     }
   }
