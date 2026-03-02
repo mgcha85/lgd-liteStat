@@ -15,6 +15,11 @@ export default defineConfig({
         target: 'http://canvas-analysis:8000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/canvas/, '')
+      },
+      '/pattern': {
+        target: 'http://map-pattern:8003',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/pattern/, '')
       }
     }
   }

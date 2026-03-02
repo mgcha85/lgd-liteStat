@@ -237,3 +237,58 @@ export async function analyzeHierarchy(params) {
 export function getHierarchyExportUrl(sessionId) {
     return `${API_BASE}/analyze/hierarchy/${sessionId}/export`;
 }
+
+// ==========================================
+// Map Pattern Analysis API Integration
+// ==========================================
+
+export async function analyzeMapPattern(file, facilityCode, partNoName, cols = 10, rows = 20) {
+    // 1. Send to canvas-analysis for Gridding & Dense Backfill
+    const gridFormData = new FormData();
+    gridFormData.append("defect_file", file);
+    gridFormData.append("facility_code", facilityCode);
+    gridFormData.append("part_no_name", partNoName);
+    gridFormData.append("N", cols.toString());
+    gridFormData.append("M", rows.toString());
+
+    // canvas-analysis is on port 8000
+    // We assume API_BASE is something like localhost:8082/api but canvas is direct
+    // Since we are running in docker, we might need a proxy or direct localhost port
+    // If frontend proxies /api to backend, we might need to call canvas port 8000 directly.
+    // For local dev with vite, let's use the absolute port 8000
+    const canvasUrl = import.meta.env.VITE_CANVAS_API_URL || 'http://localhost:8000';
+
+    const gridRes = await fetch(`${canvasUrl}/analyze/grid`, {
+        method: "POST",
+        body: gridFormData
+    });
+
+    if (!gridRes.ok) {
+        const err = await gridRes.text();
+        throw new Error(`Grid Processing Failed: ${err}`);
+    }
+
+    // Get the processed parquet blob
+    const griddedBlob = await gridRes.blob();
+    const griddedFile = new File([griddedBlob], "gridded_defect.parquet", { type: "application/octet-stream" });
+
+    // 2. Send the gridded parquet to map-pattern for Pattern Detection & Ranking
+    const patternFormData = new FormData();
+    patternFormData.append("defect_file", griddedFile);
+    patternFormData.append("addr_col", "sub_panel_addr"); // The dense grid uses this column
+
+    const patternUrl = import.meta.env.VITE_MAP_PATTERN_API_URL || '/pattern';
+
+    const patternRes = await fetch(`${patternUrl}/analyze/pattern`, {
+        method: "POST",
+        body: patternFormData
+    });
+
+    if (!patternRes.ok) {
+        const err = await patternRes.text();
+        throw new Error(`Pattern Analysis Failed: ${err}`);
+    }
+
+    // Now expects a JSON response containing { ranked_patterns: [...], download_url: ... }
+    return await patternRes.json();
+}
