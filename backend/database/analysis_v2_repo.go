@@ -88,6 +88,17 @@ func (db *DB) AnalyzeHierarchy(params AnalysisParamsV2) ([]HierarchyResult, erro
 		args = append(args, params.ModelCode)
 	}
 
+	// Product IDs filter (Route Analysis Drill-down)
+	if len(params.ProductIDs) > 0 {
+		placeholders := make([]string, len(params.ProductIDs))
+		for i, id := range params.ProductIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		inClause := fmt.Sprintf("g.product_id IN (%s)", strings.Join(placeholders, ","))
+		whereClauses = append(whereClauses, inClause)
+	}
+
 	// Date Range
 	if params.Start != "" && params.End != "" {
 		dateCol := "g.inspection_time" // Default

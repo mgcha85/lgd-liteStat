@@ -1,5 +1,6 @@
 <script>
-    import { analyzeMapPattern } from "./api.js";
+    import { analyzeMapPattern, getProductsFromPattern } from "./api.js";
+    import { activeTab, routeAnalysisProducts } from "./store.js";
 
     let defectFile = null;
     let facilityCode = "A1T";
@@ -106,14 +107,39 @@
         }
     }
 
-    function copyPanelsToClipboard(panels) {
+    async function extractAndRoute(panels) {
         if (!panels || panels.length === 0) return;
-        const text = panels.join(", ");
-        navigator.clipboard.writeText(text).then(() => {
-            alert(
-                `복사 완료: ${panels.length}개의 패널 주소가 클립보드에 복사되었습니다.\n\nRoute Analysis의 Panel 필터에 붙여넣기 하세요.`,
+
+        patternLoading = true;
+        error = null;
+        try {
+            const result = await getProductsFromPattern(
+                defectFile,
+                facilityCode,
+                partNoName,
+                gridN,
+                gridM,
+                panels,
             );
-        });
+
+            const pIds = result.product_ids || [];
+            if (pIds.length === 0) {
+                alert(
+                    "해당 패턴 영역에 위치한 불량을 가진 Product가 없습니다.",
+                );
+                return;
+            }
+
+            // 1. Store the exact product list in global state
+            routeAnalysisProducts.set(pIds);
+
+            // 2. Switch tab to Dashboard (Route Analysis)
+            activeTab.set("dashboard");
+        } catch (e) {
+            error = "라우트 분석을 위한 Product ID 추출 실패: " + e.message;
+        } finally {
+            patternLoading = false;
+        }
     }
 </script>
 
@@ -302,8 +328,7 @@
                             <button
                                 type="button"
                                 class="card text-left bg-base-100 shadow-sm border border-gray-200 cursor-pointer hover:border-primary transition-colors focus:outline-none focus:ring-2 focus:ring-primary w-full"
-                                on:click={() =>
-                                    copyPanelsToClipboard(pattern.panels)}
+                                on:click={() => extractAndRoute(pattern.panels)}
                             >
                                 <div class="card-body p-4 w-full">
                                     <div
@@ -325,10 +350,13 @@
                                             {pattern.panels.length} Panels
                                         </div>
                                     </div>
-                                    <p class="text-xs text-gray-500 mt-2">
-                                        클릭하여 <strong
+                                    <p
+                                        class="text-xs text-primary mt-2 flex items-center gap-1 font-medium"
+                                    >
+                                        🚀 클릭하여 해당 패턴의 <strong
                                             >{pattern.panels.length}</strong
-                                        >개의 좌표 복사 (Route Analysis 용)
+                                        >개 패널 기준
+                                        <strong>Route Analysis</strong> 즉시 실행
                                     </p>
                                 </div>
                             </button>

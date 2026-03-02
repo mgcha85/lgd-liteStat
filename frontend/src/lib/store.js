@@ -14,3 +14,6 @@ export const chartMode = writable(storedChartMode);
 chartMode.subscribe((value) => {
     localStorage.setItem('chartMode', value);
 });
+
+export const activeTab = writable("dashboard");
+export const routeAnalysisProducts = writable([]);

@@ -5,9 +5,8 @@
   import Dashboard from "./lib/Dashboard.svelte";
   import Settings from "./lib/Settings.svelte";
   import MapGridding from "./lib/MapGridding.svelte";
-  import { theme } from "./lib/store.js"; // Import to initialize subscription
+  import { theme, activeTab } from "./lib/store.js"; // Import to initialize subscription
 
-  const activeTab = writable("dashboard");
   const config = writable(null);
   const loading = writable(true);
   const error = writable(null);

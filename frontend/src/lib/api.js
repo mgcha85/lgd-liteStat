@@ -255,8 +255,8 @@ export async function analyzeMapPattern(file, facilityCode, partNoName, cols = 1
     // We assume API_BASE is something like localhost:8082/api but canvas is direct
     // Since we are running in docker, we might need a proxy or direct localhost port
     // If frontend proxies /api to backend, we might need to call canvas port 8000 directly.
-    // For local dev with vite, let's use the absolute port 8000
-    const canvasUrl = import.meta.env.VITE_CANVAS_API_URL || 'http://localhost:8000';
+    // For local dev with vite, let's use the absolute port 8000 or proxy
+    const canvasUrl = import.meta.env.VITE_CANVAS_API_URL || '/canvas';
 
     const gridRes = await fetch(`${canvasUrl}/analyze/grid`, {
         method: "POST",
@@ -291,4 +291,28 @@ export async function analyzeMapPattern(file, facilityCode, partNoName, cols = 1
 
     // Now expects a JSON response containing { ranked_patterns: [...], download_url: ... }
     return await patternRes.json();
+}
+
+export async function getProductsFromPattern(file, facilityCode, partNoName, cols, rows, targetPanels) {
+    const formData = new FormData();
+    formData.append("defect_file", file);
+    formData.append("facility_code", facilityCode);
+    formData.append("part_no_name", partNoName);
+    formData.append("N", cols.toString());
+    formData.append("M", rows.toString());
+    formData.append("target_panels", JSON.stringify(targetPanels));
+
+    const canvasUrl = import.meta.env.VITE_CANVAS_API_URL || '/canvas';
+
+    const res = await fetch(`${canvasUrl}/analyze/grid/products`, {
+        method: "POST",
+        body: formData
+    });
+
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Failed to extract products: ${err}`);
+    }
+
+    return await res.json(); // { product_ids: [...] }
 }

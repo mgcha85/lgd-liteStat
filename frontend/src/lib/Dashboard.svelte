@@ -12,7 +12,7 @@
         getHierarchyExportUrl,
     } from "./api.js";
     import HierarchyResultCard from "./HierarchyResultCard.svelte";
-    import { theme, chartMode } from "./store.js";
+    import { theme, chartMode, routeAnalysisProducts } from "./store.js";
 
     export let config;
 
@@ -107,8 +107,17 @@
         }, 3000);
     }
 
-    async function runHierarchyAnalysis() {
-        if (!selectedModel) {
+    $: if ($routeAnalysisProducts && $routeAnalysisProducts.length > 0) {
+        const pIds = [...$routeAnalysisProducts];
+        routeAnalysisProducts.set([]); // Clear so it only runs once per click
+        runHierarchyAnalysis(pIds);
+    }
+
+    async function runHierarchyAnalysis(customProductIds = null) {
+        if (
+            !selectedModel &&
+            !(customProductIds && customProductIds.length > 0)
+        ) {
             showToast("모델을 선택해주세요.", "error");
             return;
         }
@@ -121,12 +130,20 @@
         try {
             const params = {
                 facility: selectedFacility,
-                start: startDate,
+                start: startDate, // Date is still passed but backend gives priority to product_ids
                 end: endDate,
                 model_code: selectedModel,
                 defect_name: defectName,
                 analysis_level: analysisLevel,
             };
+
+            if (customProductIds && customProductIds.length > 0) {
+                params.product_ids = customProductIds;
+                showToast(
+                    `🔗선택된 패턴 영역의 ${customProductIds.length}개 품목 기준 Route 분석을 시작합니다.`,
+                    "info",
+                );
+            }
 
             const resp = await analyzeHierarchy(params);
 
@@ -136,10 +153,7 @@
             if (hierarchyResults.length === 0) {
                 showToast("검색 결과가 없습니다.", "info");
             } else {
-                showToast(
-                    `분석 완료: ${hierarchyResults.length}건`,
-                    "success",
-                );
+                showToast(`분석 완료: ${hierarchyResults.length}건`, "success");
             }
         } catch (e) {
             console.error("Hierarchy Analysis Error:", e);
@@ -456,11 +470,10 @@
                     <div class="flex items-end gap-2">
                         <button
                             class="btn btn-primary flex-1 rounded-xl"
-                            on:click={runHierarchyAnalysis}
+                            on:click={() => runHierarchyAnalysis(null)}
                             disabled={loading}
                         >
-                            {#if loading}<span
-                                    class="loading loading-spinner"
+                            {#if loading}<span class="loading loading-spinner"
                                 ></span>{/if}
                             분석
                         </button>
@@ -495,13 +508,18 @@
                 <div class="flex gap-2 items-center">
                     <div class="join">
                         <button
-                            class="join-item btn btn-sm {$chartMode === 'image' ? 'btn-active btn-primary' : ''}"
+                            class="join-item btn btn-sm {$chartMode === 'image'
+                                ? 'btn-active btn-primary'
+                                : ''}"
                             on:click={() => chartMode.set("image")}
                         >
                             Image
                         </button>
                         <button
-                            class="join-item btn btn-sm {$chartMode === 'interactive' ? 'btn-active btn-primary' : ''}"
+                            class="join-item btn btn-sm {$chartMode ===
+                            'interactive'
+                                ? 'btn-active btn-primary'
+                                : ''}"
                             on:click={() => chartMode.set("interactive")}
                         >
                             Interactive
@@ -555,7 +573,9 @@
             <div class="card bg-base-100 shadow-xl mb-6 overflow-hidden">
                 <div class="card-body p-0">
                     <div class="overflow-x-auto max-h-72">
-                        <table class="table table-zebra table-pin-rows table-sm">
+                        <table
+                            class="table table-zebra table-pin-rows table-sm"
+                        >
                             <thead>
                                 <tr>
                                     <th>#</th>
@@ -571,21 +591,32 @@
                             <tbody>
                                 {#each paginatedResults as r, i}
                                     <tr>
-                                        <th>{(currentPage - 1) * pageSize + i + 1}</th>
+                                        <th
+                                            >{(currentPage - 1) * pageSize +
+                                                i +
+                                                1}</th
+                                        >
                                         <td>{r.process_code}</td>
                                         <td>{r.equipment_line_id || "-"}</td>
                                         <td>{r.equipment_machine_id || "-"}</td>
                                         <td>{r.equipment_path_id || "-"}</td>
-                                        <td>{r.total_products?.toLocaleString()}</td>
-                                        <td>{r.total_defects?.toLocaleString()}</td>
-                                        <td class="font-mono">{r.dpu?.toFixed(4)}</td>
+                                        <td
+                                            >{r.total_products?.toLocaleString()}</td
+                                        >
+                                        <td
+                                            >{r.total_defects?.toLocaleString()}</td
+                                        >
+                                        <td class="font-mono"
+                                            >{r.dpu?.toFixed(4)}</td
+                                        >
                                     </tr>
                                 {:else}
                                     <tr>
                                         <td
                                             colspan="8"
                                             class="text-center py-4 text-gray-500"
-                                        >데이터가 없습니다</td>
+                                            >데이터가 없습니다</td
+                                        >
                                     </tr>
                                 {/each}
                             </tbody>
@@ -622,7 +653,9 @@
                 <HierarchyResultCard {result} index={i} />
             {/each}
         {:else if !loading}
-            <div class="flex flex-col items-center justify-center h-48 text-base-content/40">
+            <div
+                class="flex flex-col items-center justify-center h-48 text-base-content/40"
+            >
                 <p>분석 조건을 설정하고 "분석" 버튼을 클릭하세요.</p>
             </div>
         {/if}
