@@ -15,6 +15,7 @@ services:
     environment:
       - DB_PATH=/app/data/analytics.duckdb
       - CGO_ENABLED=1
+      - GOFLAGS=-mod=vendor
       - PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     command: /go/bin/air
     restart: unless-stopped
